@@ -1,0 +1,7 @@
+[SceneDispatcher
+ [[Name Scene]
+  [Persistent True]]
+ [[PlayerDispatcher
+  [[Name Player]
+   [Position [-300 -175.6805]]
+   [Depth 1]]]]]

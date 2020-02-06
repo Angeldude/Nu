@@ -1,8 +1,0 @@
-[PlayerGroupDispatcher
- [[Name Group]
-  [PublishChanges True]
-  [Persistent True]]
- [[PlayerDispatcher
-  [[Name Player]
-   [Position [-300 -175.6805]]
-   [Depth 1]]]]]
