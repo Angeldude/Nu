@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -12,14 +12,7 @@ module Stream =
 
     /// Take only one event from a stream per update.
     let [<DebuggerHidden; DebuggerStepThrough>] noMoreThanOncePerUpdate (stream : Stream<'a, World>) =
-        stream |>
-        Stream.trackEvent4
-            (fun (a, current) _ world ->
-                let previous = current
-                let current = World.getUpdateCount world
-                ((a, current), previous < current))
-            id (Unchecked.defaultof<'a>, -1L) |>
-        Stream.first
+        World.noMoreThanOncePerUpdate stream
 
     /// Take events from a stream only while World.isTicking evaluates to true.
     let [<DebuggerHidden; DebuggerStepThrough>] isTicking stream =
@@ -40,19 +33,11 @@ module Stream =
     let [<DebuggerHidden; DebuggerStepThrough>] isSelectedScreenTransitioning stream =
         Stream.filterEvent (fun _ -> World.isSelectedScreenTransitioning) stream
 
-    /// Transform a stream into existing layers.
-    let [<DebuggerHidden; DebuggerStepThrough>] layers lens mapper =
-        World.streamLayers lens mapper
-
-    /// Transform a stream into existing entities.
-    let [<DebuggerHidden; DebuggerStepThrough>] entities lens mapper =
-        World.streamEntities lens mapper
-
 [<AutoOpen>]
 module StreamOperators =
 
     /// Stream sequencing operator.
-    let (---) = (|>)
+    let [<DebuggerHidden; DebuggerStepThrough>] (---) = (|>)
 
     /// Make a stream of the subscriber's change events.
     let [<DebuggerHidden; DebuggerStepThrough>] (!--) (lens : Lens<'b, World>) = !-- lens

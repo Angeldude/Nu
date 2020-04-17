@@ -1,11 +1,20 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
+open System.Diagnostics
+#if !PLATFORM_AGNOSTIC_TIMESTAMPING
 open System.Runtime.InteropServices
+#endif
 open System.Configuration
 open Prime
+
+/// Specifies the screen-clearing routine.
+/// NOTE: this type is here only to make the screen clear constant defineable in Constants.fs.
+type ScreenClear =
+    | NoClear
+    | ColorClear of byte * byte * byte
 
 [<RequireQualifiedAccess>]
 module internal CoreInternal =
@@ -18,7 +27,7 @@ module internal CoreInternal =
 #if PLATFORM_AGNOSTIC_TIMESTAMPING
     /// Get a time stamp at the highest-available resolution on linux.
     let internal getTimeStampInternal () =
-        System.Diagnostics.Stopwatch.GetTimestamp ()
+        Stopwatch.GetTimestamp ()
 #else
     /// Query the windows performance counter.
     [<DllImport "Kernel32.dll">]
@@ -44,8 +53,7 @@ module Core =
     /// Get a unique time stamp, spin until the time stamp advances if need be.
     let getUniqueTimeStamp () =
         let mutable nextStamp = getTimeStamp ()
-        while nextStamp = lastStamp do
-            nextStamp <- getTimeStamp ()
+        while nextStamp = lastStamp do nextStamp <- getTimeStamp ()
         lastStamp <- nextStamp
         nextStamp
 
@@ -77,74 +85,14 @@ module CoreOperators =
     /// The implicit conversion operator.
     /// Same as the (!!) operator found in Prime, but placed here to expose it directly from Nu.
     let inline (!!) (arg : ^a) : ^b = ((^a or ^b) : (static member op_Implicit : ^a -> ^b) arg)
-
-    // TODO: remove this once Prime is updated.
-    let inline bind source signal : Binding<'m, 'c, 's, 'w> = source => signal
-
-    // TODO: remove this once Prime is updated.
-    let inline react source signal : Binding<'m, 'c, 's, 'w> = source =|> signal
-
-[<AutoOpen>]
-module Gen =
-
-    let mutable private Counter = -1L
-    let private CounterLock = obj ()
-
-    /// Generates values on-demand.
-    type Gen =
-        private | Gen of unit
-
-        /// Generate a unique counter.
-        static member counter =
-            lock CounterLock (fun () -> Counter <- inc Counter; Counter)
-
-        /// The prefix of a generated name
-        static member namePrefix =
-            "@"
-
-        /// Generate a unique name.
-        static member name =
-            Gen.namePrefix + scstring Gen.counter
-
-        /// Generate a unique name if given none.
-        static member nameIf nameOpt =
-            match nameOpt with
-            | Some name -> name
-            | None -> Gen.name
-
-        /// Check that a name is generated.
-        static member isName (name : string) =
-            name.StartsWith Gen.namePrefix
-
-        /// Generate a unique id.
-        static member id =
-            Guid.NewGuid ()
-        
-        /// Generate an id from a couple of ints.
-        /// It is the user's responsibility to ensure uniqueness when using the resulting ids.
-        static member idFromInts m n =
-            let bytes = Array.create<byte> 8 (byte 0)
-            Guid (m, int16 (n >>> 16), int16 n, bytes)
-
-        /// Generate an id deterministically.
-        /// HACK: this is an ugly hack to create a deterministic sequance of guids.
-        /// Limited to creating 65,536 guids.
-        static member idDeterministic offset (guid : Guid) =
-            let arr = guid.ToByteArray ()
-            if arr.[15] + byte offset < arr.[15] then arr.[14] <- arr.[14] + byte 1
-            arr.[15] <- arr.[15] + byte offset                    
-            Guid arr
-
-        /// Derive a unique id and name if given none.
-        static member idAndNameIf nameOpt =
-            let id = Gen.id
-            let name = Gen.nameIf nameOpt
-            (id, name)
-
-/// Generates values on-demand.
-type Gen = Gen.Gen
-
-/// Specifies the screen-clearing routine.
-type ScreenClear =
-    | NoClear
-    | ColorClear of byte * byte * byte
+    
+    // TODO: remove this after updating Prime.
+    let computed (lens : Lens<'a, 'w>) (get : 't -> 'w -> 'a) (setOpt : ('a -> 't -> 'w -> 'w) option) =
+        let computedProperty =
+            ComputedProperty.make
+                typeof<'a>
+                (fun (target : obj) (world : obj) -> get (target :?> 't) (world :?> 'w) :> obj)
+                (match setOpt with
+                    | Some set -> Some (fun value (target : obj) (world : obj) -> set (value :?> 'a) (target :?> 't) (world :?> 'w) :> obj)
+                    | None -> None)
+        PropertyDefinition.makeValidated lens.Name typeof<ComputedProperty> (ComputedExpr computedProperty)

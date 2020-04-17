@@ -17,7 +17,7 @@
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -26,14 +26,14 @@
     <DefineConstants>TRACE;DEBUG;PLATFORM_AGNOSTIC_TIMESTAMPING</DefineConstants>
     <WarningLevel>5</WarningLevel>
     <DocumentationFile>bin\Debug\Nu.XML</DocumentationFile>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <Prefer32Bit>false</Prefer32Bit>
-    <PlatformTarget>AnyCPU</PlatformTarget>
+    <PlatformTarget>x64</PlatformTarget>
     <OtherFlags>--warnon:1182</OtherFlags>
     <NoWarn>9</NoWarn>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <Tailcalls>true</Tailcalls>
@@ -41,10 +41,10 @@
     <DefineConstants>TRACE;PLATFORM_AGNOSTIC_TIMESTAMPING</DefineConstants>
     <WarningLevel>5</WarningLevel>
     <DocumentationFile>bin\Release\Nu.XML</DocumentationFile>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <Prefer32Bit>false</Prefer32Bit>
-    <PlatformTarget>AnyCPU</PlatformTarget>
+    <PlatformTarget>x64</PlatformTarget>
     <OtherFlags>--warnon:1182</OtherFlags>
     <NoWarn>9</NoWarn>
   </PropertyGroup>
@@ -69,6 +69,7 @@
     <Compile Include="Core.fs" />
     <Compile Include="Assets.fs" />
     <Compile Include="Constants.fs" />
+    <Compile Include="Gen.fs" />
     <Compile Include="Math.fs" />
     <Compile Include="SpatialTree.fs" />
     <Compile Include="Overlayer.fs" />
@@ -85,14 +86,13 @@
     <Compile Include="Subsystems.fs" />
     <Compile Include="AmbientState.fs" />
     <Compile Include="WorldTypes.fs" />
-    <Compile Include="WorldDescriptive.fs" />
     <Compile Include="WorldEvents.fs" />
+    <Compile Include="WorldDescriptive.fs" />
     <Compile Include="WorldModule.fs" />
     <Compile Include="WorldModuleGame.fs" />
     <Compile Include="WorldModuleScreen.fs" />
     <Compile Include="WorldModuleLayer.fs" />
     <Compile Include="WorldModuleEntity.fs" />
-    <Compile Include="WorldModuleSimulant.fs" />
     <Compile Include="WorldDeclarative.fs" />
     <Compile Include="WorldEntity.fs" />
     <Compile Include="WorldLayer.fs" />
@@ -111,7 +111,6 @@
     <Compile Include="WorldConsole.fs" />
     <Compile Include="WorldBindings.fs" />
     <Compile Include="WorldStream.fs" />
-    <Compile Include="WorldState.fs" />
     <Compile Include="World.fs" />
     <Compile Include="ReflectionTests.fs" />
     <Compile Include="SpatialTreeTests.fs" />
@@ -220,7 +219,10 @@
       <HintPath>..\Nu.Dependencies\Nito.Collections.Deque\Nito.Collections.Deque.dll</HintPath>
     </Reference>
     <Reference Include="Prime">
-      <HintPath>..\..\packages\Prime.4.1.0\lib\net472\Prime.exe</HintPath>
+      <HintPath>..\..\packages\Prime.5.1.0\lib\net472\Prime.dll</HintPath>
+    </Reference>
+    <Reference Include="Prime.Scripting">
+      <HintPath>..\..\packages\Prime.Scripting.5.1.0\lib\net472\Prime.Scripting.exe</HintPath>
     </Reference>
     <Reference Include="SDL2-CS">
       <HintPath>..\Nu.Dependencies\SDL2-CS\Release\SDL2-CS.dll</HintPath>

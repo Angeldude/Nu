@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -9,11 +9,50 @@ open SDL2
 open Prime
 open Nu
 
-[<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+// HACK: I had to remove the [<RequireQualifiedAccess>] attribute from here because it was being interpreted in an
+// ambiguous way by F# Interactive.
 module Nu =
 
     let mutable private Initialized = false
+
     let private LoadedAssemblies = Dictionary<string, Assembly> HashIdentity.Structural
+
+    /// Propagate lensed property directly.
+    let private propagate (left : World Lens) (right : World Lens) (_ : Event) world =
+        if right.Validate world then
+            let value =
+                match right.GetWithoutValidation world with
+                | :? DesignerProperty as property -> property.DesignerValue
+                | value -> value
+            let world =
+                match left.GetWithoutValidation world with
+                | :? DesignerProperty as designerProperty -> (Option.get left.SetOpt) ({ designerProperty with DesignerValue = value } :> obj) world
+                | _ -> (Option.get left.SetOpt) value world
+            world
+        else world
+
+    /// Propagate lensed property by property name.
+    let private propagateByName simulant leftName (right : World Lens) (_ : Event) world =
+        let nonPersistent = not (Reflection.isPropertyPersistentByName leftName)
+        let alwaysPublish = Reflection.isPropertyAlwaysPublishByName leftName
+        if right.Validate world then
+            let value =
+                match right.GetWithoutValidation world with
+                | :? DesignerProperty as property -> property.DesignerValue
+                | value -> value
+            match World.tryGetProperty leftName simulant world with
+            | Some property ->
+                if property.PropertyType = typeof<DesignerProperty> then
+                    let designerProperty = property.PropertyValue :?> DesignerProperty
+                    let property = { PropertyType = typeof<DesignerProperty>; PropertyValue = { designerProperty with DesignerValue = value }}
+                    World.setProperty leftName alwaysPublish nonPersistent property simulant world
+                else
+                    let property = { property with PropertyValue = value }
+                    World.setProperty leftName alwaysPublish nonPersistent property simulant world
+            | None ->
+                Log.debug "Property propagation failed. You have used a composed lens on a faux simulant reference, which is not supported."
+                world
+        else world
 
     /// Initialize the Nu game engine.
     let init nuConfig =
@@ -86,13 +125,13 @@ module Nu =
                     | :? Layer as layer ->
                         match (valueOpt, WorldModuleLayer.Setters.TryGetValue propertyName) with
                         | (Some value, (true, setter)) ->
-                            let screen = ltos layer
+                            let screen = layer.Parent
                             let world = if not (World.getScreenExists screen world) then World.createScreen None world |> snd else world
                             let world = if not (World.getLayerExists layer world) then World.createLayer None screen world |> snd else world
                             let property = { PropertyValue = value; PropertyType = ty }
                             setter property layer world |> snd |> box
                         | (Some value, (false, _)) ->
-                            let screen = ltos layer
+                            let screen = layer.Parent
                             let world = if not (World.getScreenExists screen world) then World.createScreen None world |> snd else world
                             let world = if not (World.getLayerExists layer world) then World.createLayer None screen world |> snd else world
                             let property = { PropertyValue = value; PropertyType = ty }
@@ -104,16 +143,16 @@ module Nu =
                     | :? Entity as entity ->
                         match (valueOpt, WorldModuleEntity.Setters.TryGetValue propertyName) with
                         | (Some value, (true, setter)) ->
-                            let layer = etol entity
-                            let screen = ltos layer
+                            let layer = entity.Parent
+                            let screen = layer.Parent
                             let world = if not (World.getScreenExists screen world) then World.createScreen None world |> snd else world
                             let world = if not (World.getLayerExists layer world) then World.createLayer None screen world |> snd else world
                             let world = if not (World.getEntityExists entity world) then World.createEntity None DefaultOverlay layer world |> snd else world
                             let property = { PropertyValue = value; PropertyType = ty }
                             setter property entity world |> snd |> box
                         | (Some value, (false, _)) ->
-                            let layer = etol entity
-                            let screen = ltos layer
+                            let layer = entity.Parent
+                            let screen = layer.Parent
                             let world = if not (World.getScreenExists screen world) then World.createScreen None world |> snd else world
                             let world = if not (World.getLayerExists layer world) then World.createLayer None screen world |> snd else world
                             let world = if not (World.getEntityExists entity world) then World.createEntity None DefaultOverlay layer world |> snd else world
@@ -259,63 +298,32 @@ module Nu =
                     World.unregisterEntityPhysics entity world)
                     world entities
 
-            // init addSimulantScriptUnsubscription F# reach-around
-            WorldModule.addSimulantScriptUnsubscription <- fun unsubscription (simulant : Simulant) world ->
-                match simulant with
-                | :? Game as game -> game.ScriptUnsubscriptions.Update (List.cons unsubscription) world
-                | :? Screen as screen -> screen.ScriptUnsubscriptions.Update (List.cons unsubscription) world
-                | :? Layer as layer -> layer.ScriptUnsubscriptions.Update (List.cons unsubscription) world
-                | :? Entity as entity -> entity.ScriptUnsubscriptions.Update (List.cons unsubscription) world
-                | _ -> world
-
-            // init unsubscribeSimulantScripts F# reach-around
-            WorldModule.unsubscribeSimulantScripts <- fun (simulant : Simulant) world ->
-                let propertyOpt =
-                    match simulant with
-                    | :? Game as game -> Some game.ScriptUnsubscriptions
-                    | :? Screen as screen -> Some screen.ScriptUnsubscriptions
-                    | :? Layer as layer -> Some layer.ScriptUnsubscriptions
-                    | :? Entity as entity -> Some entity.ScriptUnsubscriptions
-                    | _ -> None
-                match propertyOpt with
-                | Some property ->
-                    let unsubscriptions = property.Get world
-                    let world = List.foldBack apply unsubscriptions world
-                    property.Set [] world
-                | None -> world
-
-            // init equate5 F# reach-around
-            WorldModule.equate5 <- fun name (simulant : Simulant) (lens : World Lens) breaking world ->
-                let nonPersistent = not (Reflection.isPropertyPersistentByName name)
-                let alwaysPublish = Reflection.isPropertyAlwaysPublishByName name
-                let propagate (_ : Event) world =
-                    let property = { PropertyType = lens.Type; PropertyValue = lens.Get world }
-                    World.setProperty name nonPersistent alwaysPublish property simulant world
+            // init fix5 F# reach-around
+            WorldModule.fix5 <- fun simulant left right breaking world ->
+                let propagate = if notNull (left.This :> obj) then propagate left right else propagateByName simulant left.Name right
                 let breaker = if breaking then Stream.noMoreThanOncePerUpdate else Stream.id
-                let world = Stream.make (atooa Events.Register --> lens.This.SimulantAddress) |> breaker |> Stream.optimize |> Stream.monitor propagate simulant $ world
-                Stream.make (atooa (Events.Change lens.Name) --> lens.This.SimulantAddress) |> breaker |> Stream.optimize |> Stream.monitor propagate simulant $ world
+                let world = Stream.make (atooa Events.Register --> right.This.SimulantAddress) |> breaker |> Stream.optimize |> Stream.monitor propagate right.This $ world
+                Stream.make (atooa (Events.Change right.Name) --> right.This.SimulantAddress) |> breaker |> Stream.optimize |> Stream.monitor propagate right.This $ world
 
-            // init signal F# reach-around
-            WorldModule.trySignalFacet <- fun signalObj facetName simulant world ->
-                World.trySignalFacet signalObj facetName simulant world
-
-            // init signal F# reach-around
-            WorldModule.trySignal <- fun signalObj simulant world ->
-                World.trySignal signalObj simulant world
+            // init remaining reach-arounds
+            WorldModule.register <- fun simulant world -> World.register simulant world
+            WorldModule.unregister <- fun simulant world -> World.unregister simulant world
+            WorldModule.expandContent <- fun setScreenSplash guidOpt content origin parent world -> World.expandContent setScreenSplash guidOpt content origin parent world
+            WorldModule.destroy <- fun simulant world -> World.destroy simulant world
+            WorldModule.trySignalFacet <- fun signalObj facetName simulant world -> World.trySignalFacet signalObj facetName simulant world
+            WorldModule.trySignal <- fun signalObj simulant world -> World.trySignal signalObj simulant world
 
             // init scripting
             World.initScripting ()
             WorldBindings.initBindings ()
 
             // init debug view F# reach-arounds
-#if DEBUG
             Debug.World.viewGame <- fun world -> Debug.Game.view (world :?> World)
             Debug.World.viewScreen <- fun screen world -> Debug.Screen.view (screen :?> Screen) (world :?> World)
             Debug.World.viewLayer <- fun layer world -> Debug.Layer.view (layer :?> Layer) (world :?> World)
             Debug.World.viewEntity <- fun entity world -> Debug.Entity.view (entity :?> Entity) (world :?> World)
-#endif
 
-            // init Vsync
+            // init vsync
             Vsync.Init nuConfig.RunSynchronously
 
             // init event world caching
@@ -445,7 +453,7 @@ module WorldModule3 =
 
         /// Attempt to make the world, returning either a Right World on success, or a Left string
         /// (with an error message) on failure.
-        static member tryMake (plugin : NuPlugin) sdlDeps config =
+        static member tryMake sdlDeps config (plugin : NuPlugin) =
 
             // ensure game engine is initialized
             Nu.init config.NuConfig
@@ -557,3 +565,13 @@ module WorldModule3 =
                     | Left struct (error, _) -> Left error
                 | Left error -> Left error
             | Left error -> Left error
+
+        /// Run the game engine as a stand-alone application.
+        static member run worldConfig plugin =
+            match SdlDeps.attemptMake worldConfig.SdlConfig with
+            | Right sdlDeps ->
+                use sdlDeps = sdlDeps // bind explicitly to dispose automatically
+                match World.tryMake sdlDeps worldConfig plugin with
+                | Right world -> World.run4 tautology sdlDeps Running world
+                | Left error -> Log.trace error; Constants.Engine.FailureExitCode
+            | Left error -> Log.trace error; Constants.Engine.FailureExitCode

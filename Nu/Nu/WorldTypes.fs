@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Debug
 open System
@@ -84,6 +84,15 @@ type OverlayNameDescriptor =
     | RoutedOverlay
     | DefaultOverlay
     | ExplicitOverlay of string
+
+/// Describes the origin of a piece of simulnat content.
+type [<NoComparison>] ContentOrigin =
+    | SimulantOrigin of Simulant
+    | FacetOrigin of Simulant * string
+
+/// Describes the content of a simulant.
+type SimulantContent =
+    interface end
 
 /// Specifies that a module contains functions that need to be considered for binding generation.
 type [<AttributeUsage (AttributeTargets.Class); AllowNullLiteral>]
@@ -212,82 +221,70 @@ module WorldTypes =
         abstract Actualize : Game * World -> World
         default this.Actualize (_, world) = world
 
-        /// Try to get a calculated property with the given name.
-        abstract TryGetCalculatedProperty : string * Game * World -> Property option
-        default this.TryGetCalculatedProperty (_, _, _) = None
-
         /// Try to send a signal to a game.
         abstract TrySignal : obj * Game * World -> World
         default this.TrySignal (_, _, world) = world
-    
+
     /// The default dispatcher for screens.
     and ScreenDispatcher () =
         inherit SimulantDispatcher ()
-    
+
         /// Register a screen when adding it to the world.
         abstract Register : Screen * World -> World
         default this.Register (_, world) = world
-    
+
         /// Unregister a screen when removing it from the world.
         abstract Unregister : Screen * World -> World
         default this.Unregister (_, world) = world
-    
+
         /// Update a screen.
         abstract Update : Screen * World -> World
         default this.Update (_, world) = world
-    
+
         /// Post-update a screen.
         abstract PostUpdate : Screen * World -> World
         default this.PostUpdate (_, world) = world
-    
+
         /// Actualize a screen.
         abstract Actualize : Screen * World -> World
         default this.Actualize (_, world) = world
-    
-        /// Try to get a calculated property with the given name.
-        abstract TryGetCalculatedProperty : string * Screen * World -> Property option
-        default this.TryGetCalculatedProperty (_, _, _) = None
 
         /// Try to send a signal to a screen.
         abstract TrySignal : obj * Screen * World -> World
         default this.TrySignal (_, _, world) = world
-    
+
     /// The default dispatcher for layers.
     and LayerDispatcher () =
         inherit SimulantDispatcher ()
-    
+
         /// Register a layer when adding it to a screen.
         abstract Register : Layer * World -> World
         default this.Register (_, world) = world
-    
+
         /// Unregister a layer when removing it from a screen.
         abstract Unregister : Layer * World -> World
         default this.Unregister (_, world) = world
-    
+
         /// Update a layer.
         abstract Update : Layer * World -> World
         default this.Update (_, world) = world
-    
+
         /// Post-update a layer.
         abstract PostUpdate : Layer * World -> World
         default this.PostUpdate (_, world) = world
-    
+
         /// Actualize a layer.
         abstract Actualize : Layer * World -> World
         default this.Actualize (_, world) = world
-    
-        /// Try to get a calculated property with the given name.
-        abstract TryGetCalculatedProperty : string * Layer * World -> Property option
-        default this.TryGetCalculatedProperty (_, _, _) = None
 
         /// Try to send a signal to a layer.
         abstract TrySignal : obj * Layer * World -> World
         default this.TrySignal (_, _, world) = world
-    
+
     /// The default dispatcher for entities.
     and EntityDispatcher () =
         inherit SimulantDispatcher ()
-    
+
         static member Properties =
             [Define? Position Vector2.Zero
              Define? Size Constants.Engine.DefaultEntitySize
@@ -295,9 +292,13 @@ module WorldTypes =
              Define? Depth 0.0f
              Define? ViewType Relative
              Define? Omnipresent false
-             Define? StaticData { DesignerType = typeof<unit>; DesignerValue = () }
+             Define? StaticData { DesignerType = typeof<string>; DesignerValue = "" }
              Define? Overflow Vector2.Zero
+#if IMPERATIVE_ENTITIES
+             Define? Imperative true
+#else
              Define? Imperative false
+#endif
              Define? PublishChanges false
              Define? IgnoreLayer false
              Define? Visible true
@@ -306,11 +307,11 @@ module WorldTypes =
              Define? PublishUpdates false
              Define? PublishPostUpdates false
              Define? Persistent true]
-    
+
         /// Register an entity when adding it to a layer.
         abstract Register : Entity * World -> World
         default this.Register (_, world) = world
-    
+
         /// Unregister an entity when removing it from a layer.
         abstract Unregister : Entity * World -> World
         default this.Unregister (_, world) = world
@@ -318,22 +319,18 @@ module WorldTypes =
         /// Update an entity.
         abstract Update : Entity * World -> World
         default this.Update (_, world) = world
-    
+
         /// Post-update an entity.
         abstract PostUpdate : Entity * World -> World
         default this.PostUpdate (_, world) = world
-    
+
         /// Actualize an entity.
         abstract Actualize : Entity * World -> World
         default this.Actualize (_, world) = world
-    
+
         /// Get the quick size of an entity (the appropriate user-defined size for an entity).
         abstract GetQuickSize : Entity * World -> Vector2
         default this.GetQuickSize (_, _) = Constants.Engine.DefaultEntitySize
-
-        /// Try to get a calculated property with the given name.
-        abstract TryGetCalculatedProperty : string * Entity * World -> Property option
-        default this.TryGetCalculatedProperty (_, _, _) = None
 
         /// Try to send a signal to an entity's facet.
         abstract TrySignalFacet : obj * string * Entity * World -> World
@@ -345,11 +342,11 @@ module WorldTypes =
 
     /// Dynamically augments an entity's behavior in a composable way.
     and Facet () =
-    
+
         /// Register a facet when adding it to an entity.
         abstract Register : Entity * World -> World
         default this.Register (_, world) = world
-    
+
         /// Unregister a facet when removing it from an entity.
         abstract Unregister : Entity * World -> World
         default this.Unregister (_, world) = world
@@ -357,30 +354,26 @@ module WorldTypes =
         /// Participate in the registration of an entity's physics with the physics subsystem.
         abstract RegisterPhysics : Entity * World -> World
         default this.RegisterPhysics (_, world) = world
-    
+
         /// Participate in the unregistration of an entity's physics from the physics subsystem.
         abstract UnregisterPhysics : Entity * World -> World
         default this.UnregisterPhysics (_, world) = world
-    
+
         /// Update a facet.
         abstract Update : Entity * World -> World
         default this.Update (_, world) = world
-    
+
         /// Post-update a facet.
         abstract PostUpdate : Entity * World -> World
         default this.PostUpdate (_, world) = world
-    
+
         /// Actualize a facet.
         abstract Actualize : Entity * World -> World
         default this.Actualize (_, world) = world
-    
+
         /// Participate in getting the priority with which an entity is picked in the editor.
         abstract GetQuickSize : Entity * World -> Vector2
         default this.GetQuickSize (_, _) = Constants.Engine.DefaultEntitySize
-
-        /// Try to get a calculated property with the given name.
-        abstract TryGetCalculatedProperty : string * Entity * World -> Property option
-        default this.TryGetCalculatedProperty (_, _, _) = None
 
         /// Try to send a signal to a facet.
         abstract TrySignal : obj * Entity * World -> World
@@ -404,14 +397,7 @@ module WorldTypes =
           ScreenTransitionDestinationOpt : Screen option
           EyeCenter : Vector2
           EyeSize : Vector2
-          ScriptOpt : Symbol AssetTag option
-          Script : Scripting.Expr array
           ScriptFrame : Scripting.DeclarationFrame
-          ScriptUnsubscriptions : Unsubscription list
-          OnRegister : Scripting.Expr
-          OnUnregister : Scripting.Expr
-          OnUpdate : Scripting.Expr
-          OnPostUpdate : Scripting.Expr
           CreationTimeStamp : int64
           Id : Guid }
 
@@ -426,14 +412,7 @@ module WorldTypes =
               ScreenTransitionDestinationOpt = None
               EyeCenter = eyeCenter
               EyeSize = eyeSize
-              ScriptOpt = None
-              Script = [||]
               ScriptFrame = Scripting.DeclarationFrame HashIdentity.Structural
-              ScriptUnsubscriptions = []
-              OnRegister = Scripting.Unit
-              OnUnregister = Scripting.Unit
-              OnUpdate = Scripting.Unit
-              OnPostUpdate = Scripting.Unit
               CreationTimeStamp = Core.getUniqueTimeStamp ()
               Id = Gen.id }
 
@@ -470,7 +449,7 @@ module WorldTypes =
 
         interface SimulantState with
             member this.GetXtension () = this.Xtension
-    
+
     /// Hosts the ongoing state of a screen. The end-user of this engine should never touch this
     /// type, and it's public _only_ to make [<CLIMutable>] work.
     /// NOTE: The properties here have duplicated representations in WorldModuleScreen that exist
@@ -483,14 +462,7 @@ module WorldTypes =
           Incoming : Transition
           Outgoing : Transition
           Persistent : bool
-          ScriptOpt : Symbol AssetTag option
-          Script : Scripting.Expr array
           ScriptFrame : Scripting.DeclarationFrame
-          ScriptUnsubscriptions : Unsubscription list
-          OnRegister : Scripting.Expr
-          OnUnregister : Scripting.Expr
-          OnUpdate : Scripting.Expr
-          OnPostUpdate : Scripting.Expr
           CreationTimeStamp : int64
           Name : string
           Id : Guid }
@@ -505,14 +477,7 @@ module WorldTypes =
               Incoming = Transition.make Incoming
               Outgoing = Transition.make Outgoing
               Persistent = true
-              ScriptOpt = None
-              Script = [||]
               ScriptFrame = Scripting.DeclarationFrame HashIdentity.Structural
-              ScriptUnsubscriptions = []
-              OnRegister = Scripting.Unit
-              OnUnregister = Scripting.Unit
-              OnUpdate = Scripting.Unit
-              OnPostUpdate = Scripting.Unit
               CreationTimeStamp = Core.getUniqueTimeStamp ()
               Name = name
               Id = id }
@@ -561,14 +526,7 @@ module WorldTypes =
           Depth : single
           Visible : bool
           Persistent : bool
-          ScriptOpt : Symbol AssetTag option
-          Script : Scripting.Expr array
           ScriptFrame : Scripting.DeclarationFrame
-          ScriptUnsubscriptions : Unsubscription list
-          OnRegister : Scripting.Expr
-          OnUnregister : Scripting.Expr
-          OnUpdate : Scripting.Expr
-          OnPostUpdate : Scripting.Expr
           CreationTimeStamp : int64
           Name : string
           Id : Guid }
@@ -581,14 +539,7 @@ module WorldTypes =
               Depth = 0.0f
               Visible = true
               Persistent = true
-              ScriptOpt = None
-              Script = [||]
               ScriptFrame = Scripting.DeclarationFrame HashIdentity.Structural
-              ScriptUnsubscriptions = []
-              OnRegister = Scripting.Unit
-              OnUnregister = Scripting.Unit
-              OnUpdate = Scripting.Unit
-              OnPostUpdate = Scripting.Unit
               CreationTimeStamp = Core.getUniqueTimeStamp ()
               Name = name
               Id = id }
@@ -627,6 +578,8 @@ module WorldTypes =
         interface SimulantState with
             member this.GetXtension () = this.Xtension
 
+    /// A prototype component for an entity-component-system implementation of Nu's backend.
+    /// See here for the related C++ prototype - https://github.com/bryanedds/ax/blob/5bb53b6985ee1cd07f869cb88ed4e333749fd118/src/hpp/ax/impl/system.hpp#L55-L64
     and [<Struct; CLIMutable; NoEquality; NoComparison>] EntityCore =
         { mutable Transform : Transform
           mutable StaticData : DesignerProperty
@@ -649,6 +602,7 @@ module WorldTypes =
           // cache line end
           mutable OverlayNameOpt : string option
           mutable FacetNames : string Set
+          mutable ScriptFrame : Scripting.DeclarationFrame
           CreationTimeStamp : int64 // just needed for ordering writes to reduce diff volumes
           Name : string
           Id : Guid }
@@ -658,7 +612,11 @@ module WorldTypes =
             let (id, name) = Gen.idAndNameIf nameOpt
             { Dispatcher = dispatcher
               Facets = [||]
+#if IMPERATIVE_ENTITIES
+              Xtension = Xtension.makeImperative ()
+#else
               Xtension = Xtension.makeSafe ()
+#endif
               Transform =
                 { Position = Vector2.Zero
                   Size = Constants.Engine.DefaultEntitySize
@@ -666,11 +624,12 @@ module WorldTypes =
                   Depth = 0.0f
                   ViewType = Relative
                   Omnipresent = false }
-              StaticData = { DesignerType = typeof<unit>; DesignerValue = () }
+              StaticData = { DesignerType = typeof<string>; DesignerValue = "" }
               Overflow = Vector2.Zero
               Flags = 0b0100011000
               OverlayNameOpt = overlayNameOpt
               FacetNames = Set.empty
+              ScriptFrame = Scripting.DeclarationFrame HashIdentity.Structural
               CreationTimeStamp = Core.getUniqueTimeStamp ()
               Name = name
               Id = id }
@@ -688,9 +647,13 @@ module WorldTypes =
             match Xtension.trySetProperty propertyName property entityState.Xtension with
             | (true, xtension) ->
                 let entityState =
-                    if not entityState.Imperative
-                    then { entityState with Xtension = xtension }
-                    else entityState
+#if IMPERATIVE_ENTITIES
+                    ignore xtension
+                    entityState
+#else
+                    if entityState.Imperative then entityState
+                    else { entityState with Xtension = xtension }
+#endif
                 (true, entityState)
             | (false, _) -> (false, entityState)
 
@@ -705,8 +668,13 @@ module WorldTypes =
         /// Detach an xtension property.
         static member detachProperty name entityState =
             let xtension = Xtension.detachProperty name entityState.Xtension
-            if entityState.Imperative then entityState.Xtension <- xtension; entityState
+#if IMPERATIVE_ENTITIES
+            ignore xtension
+            entityState
+#else
+            if entityState.Imperative then entityState
             else { entityState with EntityState.Xtension = xtension }
+#endif
 
         /// Get an entity state's transform.
         static member getTransform entityState =
@@ -714,16 +682,19 @@ module WorldTypes =
 
         /// Set an entity state's transform.
         static member setTransform (value : Transform) (entityState : EntityState) =
+#if IMPERATIVE_ENTITIES
+            entityState.Transform.Assign value
+            entityState
+#else
             if entityState.Imperative then
-                entityState.Transform.Assign value // in-place assignment
+                entityState.Transform.Assign value
                 entityState
-            else { entityState with Transform = value } // copy assignment
+            else { entityState with Transform = value }
+#endif
 
         /// Copy an entity such as when, say, you need it to be mutated with reflection but you need to preserve persistence.
         static member copy (entityState : EntityState) =
-            if not entityState.Imperative
-            then { entityState with EntityState.Id = entityState.Id }
-            else entityState
+            { entityState with EntityState.Id = entityState.Id }
 
         // Member properties; only for use by internal reflection facilities.
         member this.Position with get () = this.Transform.Position and set value = this.Transform.Position <- value
@@ -745,20 +716,6 @@ module WorldTypes =
         interface SimulantState with
             member this.GetXtension () = this.Xtension
 
-    /// Operators for the Simulant type.
-    and SimulantOperators =
-        private
-            | SimulantOperators
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member acatff<'a> (address : 'a Address) (simulant : Simulant) =
-            match box simulant with
-            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
-            | _ -> acatff address simulant.SimulantAddress
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member (-->) (address : 'a Address, simulant : Simulant) = SimulantOperators.acatff address simulant
-
     /// The game type that hosts the various screens used to navigate through a game.
     and Game (gameAddress) =
 
@@ -770,24 +727,34 @@ module WorldTypes =
 
         /// The address of the game.
         member this.GameAddress = gameAddress
-        
-        /// Helper for accessing strongly-typed game property tags.
-        static member Prop = Unchecked.defaultof<Game>
-        
-        static member op_Implicit () = Game ()
-        
-        static member op_Implicit (gameAddress : Game Address) = Game gameAddress
 
-        interface Simulant with
-            member this.SimulantAddress = atoa<Game, Simulant> this.GameAddress
-            end
+        /// Get the latest value of a game's properties.
+        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
+        member private this.View = Debug.World.viewGame Debug.World.Chosen
+        
+        /// Helper for accessing game lenses.
+        static member Lens = Unchecked.defaultof<Game>
+
+        /// Concatenate an address with a game's address, forcing the type of first address.
+        static member (-->) (address : 'a Address, game : Game) =
+            match box game with
+            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
+            | _ -> acatff address game.GameAddress
+
+        override this.ToString () =
+            scstring this.GameAddress
 
         override this.Equals that =
             match that with
             | :? Game as that -> this.GameAddress.Equals that.GameAddress
             | _ -> false
 
-        override this.GetHashCode () = this.GameAddress.GetHashCode ()
+        override this.GetHashCode () =
+            this.GameAddress.GetHashCode ()
+
+        interface Simulant with
+            member this.SimulantAddress = atoa<Game, Simulant> this.GameAddress
+            end
 
         interface Game IComparable with
             member this.CompareTo that =
@@ -798,21 +765,6 @@ module WorldTypes =
                 match that with
                 | :? Game as that -> (this :> Game IComparable).CompareTo that
                 | _ -> failwith "Invalid Game comparison (comparee not of type Game)."
-
-        override this.ToString () = scstring this.GameAddress
-
-        /// Get the latest value of a game's properties.
-        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
-        member private this.View = Debug.World.viewGame Debug.World.Chosen
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member acatff<'a> (address : 'a Address) (game : Game) =
-            match box game with
-            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
-            | _ -> acatff address game.GameAddress
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member (-->) (address : 'a Address, game) = Game.acatff address game
 
     /// The screen type that allows transitioning to and from other screens, and also hosts the
     /// currently interactive layers of entities.
@@ -827,23 +779,42 @@ module WorldTypes =
         /// The address of the screen.
         member this.ScreenAddress = screenAddress
 
-        /// Helper for accessing strongly-typed screen property tags.
-        static member Prop = Unchecked.defaultof<Screen>
-        
-        static member op_Implicit (screenName : string) = Screen screenName
-        
-        static member op_Implicit (screenAddress : Screen Address) = Screen screenAddress
+        /// The parent game of the screen.
+        member this.Parent = Game ()
 
-        interface Simulant with
-            member this.SimulantAddress = atoa<Screen, Simulant> this.ScreenAddress
-            end
+        /// Get the name of a screen.
+        member this.Name = this.ScreenAddress.Names.[0]
+
+        /// Get the latest value of a screen's properties.
+        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
+        member private this.View = Debug.World.viewScreen (this :> obj) Debug.World.Chosen
+
+        /// Helper for accessing screen lenses.
+        static member Lens = Unchecked.defaultof<Screen>
+
+        /// Derive a layer from its screen.
+        static member (/) (screen : Screen, layerName) = Layer (atoa<Screen, Layer> screen.ScreenAddress --> ntoa layerName)
+
+        /// Concatenate an address with a screen's address, forcing the type of first address.
+        static member (-->) (address : 'a Address, screen : Screen) =
+            match box screen with
+            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
+            | _ -> acatff address screen.ScreenAddress
+
+        override this.ToString () =
+            scstring this.ScreenAddress
 
         override this.Equals that =
             match that with
             | :? Screen as that -> this.ScreenAddress.Equals that.ScreenAddress
             | _ -> false
 
-        override this.GetHashCode () = this.ScreenAddress.GetHashCode ()
+        override this.GetHashCode () =
+            this.ScreenAddress.GetHashCode ()
+
+        interface Simulant with
+            member this.SimulantAddress = atoa<Screen, Simulant> this.ScreenAddress
+            end
 
         interface Screen IComparable with
             member this.CompareTo that =
@@ -855,27 +826,6 @@ module WorldTypes =
                 | :? Screen as that -> (this :> Screen IComparable).CompareTo that
                 | _ -> failwith "Invalid Screen comparison (comparee not of type Screen)."
 
-        override this.ToString () = scstring this.ScreenAddress
-
-        /// Get the name of a screen.
-        member this.Name = this.ScreenAddress.Names.[0]
-
-        /// Get the latest value of a screen's properties.
-        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
-        member private this.View = Debug.World.viewScreen (this :> obj) Debug.World.Chosen
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member acatff<'a> (address : 'a Address) (screen : Screen) =
-            match box screen with
-            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
-            | _ -> acatff address screen.ScreenAddress
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member (-->) (address : 'a Address, screen) = Screen.acatff address screen
-
-        /// Derive a layer from its screen.
-        static member (/) (screen : Screen, layerName) = Layer (atoa<Screen, Layer> screen.ScreenAddress --> ntoa layerName)
-    
     /// Forms a logical layer of entities.
     and Layer (layerAddress) =
 
@@ -884,7 +834,7 @@ module WorldTypes =
 
         /// Create a layer reference from an address string.
         new (layerAddressStr : string) = Layer (stoa layerAddressStr)
-        
+
         /// Create a layer reference from a list of names.
         new (layerNames : string array) = Layer (rtoa layerNames)
 
@@ -897,23 +847,42 @@ module WorldTypes =
         /// The address of the layer.
         member this.LayerAddress = layerAddress
 
-        /// Helper for accessing strongly-typed layer property tags.
-        static member Prop = Unchecked.defaultof<Layer>
+        /// The parent screen of the layer.
+        member this.Parent = let names = this.LayerAddress.Names in Screen names.[0]
 
-        static member op_Implicit (layerName : string) = Layer layerName
-        
-        static member op_Implicit (layerAddress : Layer Address) = Layer layerAddress
+        /// Get the name of a layer.
+        member this.Name = Address.getName this.LayerAddress
 
-        interface Simulant with
-            member this.SimulantAddress = atoa<Layer, Simulant> this.LayerAddress
-            end
+        /// Get the latest value of a layer's properties.
+        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
+        member private this.View = Debug.World.viewLayer (this :> obj) Debug.World.Chosen
+
+        /// Derive an entity from its layer.
+        static member (/) (layer : Layer, entityName) = Entity (atoa<Layer, Entity> layer.LayerAddress --> ntoa entityName)
+
+        /// Concatenate an address with a layer's address, forcing the type of first address.
+        static member (-->) (address : 'a Address, layer : Layer) =
+            match box layer with
+            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
+            | _ -> acatff address layer.LayerAddress
+
+        /// Helper for accessing layer lenses.
+        static member Lens = Unchecked.defaultof<Layer>
+
+        override this.ToString () =
+            scstring this.LayerAddress
 
         override this.Equals that =
             match that with
             | :? Layer as that -> this.LayerAddress.Equals that.LayerAddress
             | _ -> false
 
-        override this.GetHashCode () = this.LayerAddress.GetHashCode ()
+        override this.GetHashCode () =
+            this.LayerAddress.GetHashCode ()
+
+        interface Simulant with
+            member this.SimulantAddress = atoa<Layer, Simulant> this.LayerAddress
+            end
 
         interface Layer IComparable with
             member this.CompareTo that =
@@ -924,28 +893,7 @@ module WorldTypes =
                 match that with
                 | :? Layer as that -> (this :> Layer IComparable).CompareTo that
                 | _ -> failwith "Invalid Layer comparison (comparee not of type Layer)."
-    
-        override this.ToString () = scstring this.LayerAddress
-    
-        /// Get the name of a layer.
-        member this.Name = Address.getName this.LayerAddress
-    
-        /// Get the latest value of a layer's properties.
-        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
-        member private this.View = Debug.World.viewLayer (this :> obj) Debug.World.Chosen
 
-        /// Concatenate two addresses, forcing the type of first address.
-        static member acatff<'a> (address : 'a Address) (layer : Layer) =
-            match box layer with
-            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
-            | _ -> acatff address layer.LayerAddress
-    
-        /// Concatenate two addresses, forcing the type of first address.
-        static member (-->) (address : 'a Address, layer) = Layer.acatff address layer
-        
-        /// Derive an entity from its layer.
-        static member (/) (layer : Layer, entityName) = Entity (atoa<Layer, Entity> layer.LayerAddress --> ntoa entityName)
-    
     /// The type around which the whole game engine is based! Used in combination with dispatchers
     /// to implement things like buttons, characters, blocks, and things of that sort.
     /// OPTIMIZATION: Includes pre-constructed entity change and update event addresses to avoid
@@ -955,7 +903,7 @@ module WorldTypes =
         // check that address is of correct length for an entity
         do if Address.length entityAddress <> 3 then
             failwith "Entity address must be length of 3."
-        
+
         let updateEvent =
             let entityNames = Address.getNames entityAddress
             rtoa<unit> [|"Update"; "Event"; entityNames.[0]; entityNames.[1]; entityNames.[2]|]
@@ -982,27 +930,38 @@ module WorldTypes =
         /// The address of the entity.
         member this.EntityAddress = entityAddress
 
+        /// The parent layer of the entity.
+        member this.Parent = let names = this.EntityAddress.Names in Layer [names.[0]; names.[1]]
+
         /// The address of the entity's update event.
-        member this.UpdateEvent = updateEvent
+        member this.UpdateEventCached = updateEvent
 
         /// The address of the entity's post-update event.
-        member this.PostUpdateEvent = postUpdateEvent
+        member this.PostUpdateEventCached = postUpdateEvent
 
         /// The cached entity state for imperative entities.
         member this.EntityStateOpt
             with get () = entityStateOpt
             and set value = entityStateOpt <- value
 
-        /// Helper for accessing strongly-typed entity property tags.
-        static member Prop = Unchecked.defaultof<Entity>
+        /// Get the name of an entity.
+        member this.Name = Address.getName this.EntityAddress
 
-        static member op_Implicit (entityName : string) = Entity entityName
+        /// Get the latest value of an entity's properties.
+        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
+        member private this.View = Debug.World.viewEntity (this :> obj) Debug.World.Chosen
 
-        static member op_Implicit (entityAddress : Entity Address) = Entity entityAddress
-        
-        interface Simulant with
-            member this.SimulantAddress = atoa<Entity, Simulant> this.EntityAddress
-            end
+        /// Helper for accessing entity lenses.
+        static member Lens = Unchecked.defaultof<Entity>
+
+        /// Concatenate an address with an entity, forcing the type of first address.
+        static member (-->) (address : 'a Address, entity : Entity) =
+            match box entity with
+            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
+            | _ -> acatff address entity.EntityAddress
+
+        override this.ToString () =
+            scstring this.EntityAddress
 
         override this.Equals that =
             match that with
@@ -1011,6 +970,10 @@ module WorldTypes =
 
         override this.GetHashCode () =
             this.EntityAddress.GetHashCode ()
+
+        interface Simulant with
+            member this.SimulantAddress = atoa<Entity, Simulant> this.EntityAddress
+            end
 
         interface Entity IComparable with
             member this.CompareTo that =
@@ -1022,24 +985,6 @@ module WorldTypes =
                 | :? Entity as that -> (this :> Entity IComparable).CompareTo that
                 | _ -> failwith "Invalid Entity comparison (comparee not of type Entity)."
 
-        override this.ToString () = scstring this.EntityAddress
-
-        /// Get the name of an entity.
-        member this.Name = Address.getName this.EntityAddress
-    
-        /// Get the latest value of an entity's properties.
-        [<DebuggerBrowsable (DebuggerBrowsableState.RootHidden)>]
-        member private this.View = Debug.World.viewEntity (this :> obj) Debug.World.Chosen
-
-        /// Concatenate two addresses, forcing the type of first address.
-        static member acatff<'a> (address : 'a Address) (entity : Entity) =
-            match box entity with
-            | null -> address // HACK: this case is a hack to be able to insert events into the elmish event handler
-            | _ -> acatff address entity.EntityAddress
-    
-        /// Concatenate two addresses, forcing the type of first address.
-        static member (-->) (address : 'a Address, entity) = Entity.acatff address entity
-    
     /// The world's dispatchers (including facets).
     /// 
     /// I would prefer this type to be inlined in World, but it has been extracted to its own white-box
@@ -1053,7 +998,7 @@ module WorldTypes =
           TryGetExtrinsic : string -> World ScriptingTrinsic option
           UpdateEntityInEntityTree : bool -> ViewType -> Vector4 -> Entity -> World -> World -> World
           RebuildEntityTree : World -> Entity SpatialTree }
-    
+
     /// The world, in a functional programming sense. Hosts the game object, the dependencies needed
     /// to implement a game, messages to by consumed by the various engine sub-systems, and general
     /// configuration data.
@@ -1084,7 +1029,7 @@ module WorldTypes =
               ScriptingContext : Simulant
               Plugin : NuPlugin }
 
-        interface EventSystem<World> with
+        interface World EventSystem with
 
             member this.GetLiveness () =
                 AmbientState.getLiveness this.AmbientState
@@ -1131,6 +1076,7 @@ module WorldTypes =
 #endif
                 this
 
+            [<DebuggerHidden; DebuggerStepThrough>]
             member this.PublishEventHook (simulant : Simulant) publisher eventData eventAddress eventTrace subscription world =
                 let (handling, world) =
                     match simulant with
@@ -1248,9 +1194,6 @@ type EntityDispatcher = WorldTypes.EntityDispatcher
 
 /// Dynamically augments an entity's behavior in a composable way.
 type Facet = WorldTypes.Facet
-
-/// Operators for the Simulant type.
-type SimulantOperators = WorldTypes.SimulantOperators
 
 /// The game type that hosts the various screens used to navigate through a game.
 type Game = WorldTypes.Game

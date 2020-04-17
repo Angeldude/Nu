@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -100,7 +100,7 @@ module SpatialTreeModule =
     module SpatialTree =
     
         let addElement omnipresent bounds element tree =
-            if omnipresent then 
+            if omnipresent then
                 tree.OmnipresentElements.Add element |> ignore
             else
                 if not (SpatialNode.intersectingBounds bounds tree.Node) then

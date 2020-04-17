@@ -1,15 +1,13 @@
 ﻿namespace BlazeVector
-open System
 open Prime
 open Nu
-open Nu.Declarative
 open BlazeVector
 
 [<AutoOpen>]
 module BlazeDispatcherModule =
 
     // this is our Elm-style command type. To learn about the Elm-style, read this article here -
-    // https://medium.com/@bryanedds/a-game-engine-that-allows-you-to-program-in-the-elm-style-31d806fbe27f
+    // https://vsyncronicity.com/2020/03/01/a-game-engine-in-the-elm-style/
     type BlazeCommand =
         | PlaySplashSound
         | PlayTitleSong
@@ -23,7 +21,7 @@ module BlazeDispatcherModule =
     type BlazeDispatcher () =
         inherit GameDispatcher<unit, unit, BlazeCommand> (())
 
-        // here we define the Bindings used to connect events to their desired commands
+        // here we define the bindings used to connect events to their desired commands
         override this.Bindings (_, _, _) =
             [Simulants.Splash.SelectEvent => cmd PlaySplashSound
              Simulants.Title.IncomingStartEvent => cmd PlayTitleSong
@@ -36,7 +34,7 @@ module BlazeDispatcherModule =
              Simulants.GameplayBack.ClickEvent => cmd ShowTitle]
 
         // here we handle the above commands
-        override this.Command (command, _, _, world) =
+        override this.Command (_, command, _, world) =
             let world =
                 match command with
                 | PlaySplashSound -> World.playSound 1.0f Assets.NuSplashSound world

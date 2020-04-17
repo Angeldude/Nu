@@ -1,5 +1,5 @@
 // Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 //*********************************************************************************************//
 //                                                                                             //
@@ -10,44 +10,45 @@
 namespace Nu
 open System
 open Prime
-open global.Nu
+open Nu
 
 [<RequireQualifiedAccess>]
 module WorldBindings =
 
     let [<Literal>] BindingKeywords =
-        "v2 v4 v2i get getAsStream set setAsStream update streamEvent stream equate self parent grandparent game toData monitor " +
-        "resolve reloadAssets tryGetIsSelectedScreenIdling tryGetIsSelectedScreenTransitioning isSelectedScreenIdling " +
-        "isSelectedScreenTransitioning selectScreen tryTransitionScreen transitionScreen " +
-        "setScreenSplash createDissolveScreenFromLayerFile6 createDissolveScreenFromLayerFile createSplashScreen6 " +
-        "createSplashScreen getEntitiesInView2 getEntitiesInBounds3 getEntitiesAtPoint3 " +
-        "getEntitiesInView getEntitiesInBounds getEntitiesAtPoint playSong " +
-        "playSong4 playSound playSound3 fadeOutSong " +
-        "stopSong hintAudioPackageUse hintAudioPackageDisuse reloadAudioAssets " +
-        "hintRenderPackageUse hintRenderPackageDisuse reloadRenderAssets bodyExists " +
-        "getBodyContactNormals getBodyLinearVelocity getBodyToGroundContactNormals getBodyToGroundContactNormalOpt " +
-        "getBodyToGroundContactTangentOpt isBodyOnGround createBody createBodies " +
-        "destroyBody destroyBodies setBodyPosition setBodyRotation " +
-        "setBodyAngularVelocity setBodyLinearVelocity applyBodyAngularImpulse applyBodyLinearImpulse " +
-        "applyBodyForce isMouseButtonDown getMousePosition getMousePositionF " +
-        "isKeyboardKeyDown getSelected tryGetParent getParent " +
+        "v2 v4 v2i get getAsStream set setAsStream update streamEvent stream fix self parent grandparent game toData monitor " +
+        "resolve relate reloadAssets tryGetIsSelectedScreenIdling " +
+        "tryGetIsSelectedScreenTransitioning isSelectedScreenIdling isSelectedScreenTransitioning selectScreen " +
+        "tryTransitionScreen transitionScreen setScreenSplash createDissolveScreenFromLayerFile6 " +
+        "createDissolveScreenFromLayerFile createSplashScreen6 createSplashScreen getEntitiesInView2 " +
+        "getEntitiesInBounds3 getEntitiesAtPoint3 getEntitiesInView getEntitiesInBounds " +
+        "getEntitiesAtPoint playSong playSong4 playSound " +
+        "playSound3 fadeOutSong stopSong hintAudioPackageUse " +
+        "hintAudioPackageDisuse reloadAudioAssets hintRenderPackageUse hintRenderPackageDisuse " +
+        "reloadRenderAssets bodyExists getBodyContactNormals getBodyLinearVelocity " +
+        "getBodyToGroundContactNormals getBodyToGroundContactNormalOpt getBodyToGroundContactTangentOpt isBodyOnGround " +
+        "createBody createBodies destroyBody destroyBodies " +
+        "setBodyPosition setBodyRotation setBodyAngularVelocity setBodyLinearVelocity " +
+        "applyBodyAngularImpulse applyBodyLinearImpulse applyBodyForce isMouseButtonDown " +
+        "getMousePosition getMousePositionF isKeyboardKeyDown expandContent " +
+        "destroy getSelected tryGetParent getParent " +
         "tryGetGrandparent getGrandparent getChildren getExists " +
         "getEntities0 getLayers0 isSimulantSelected writeGameToFile " +
         "readGameFromFile getScreens setScreenDissolve destroyScreen " +
         "createScreen createDissolveScreen writeScreenToFile readScreenFromFile " +
-        "getLayers destroyLayer destroyLayers writeLayerToFile " +
-        "readLayerFromFile getEntities destroyEntity destroyEntities " +
-        "tryPickEntity writeEntityToFile createEntity readEntityFromFile " +
-        "reassignEntity trySetEntityOverlayNameOpt trySetEntityFacetNames createLayer " +
+        "getLayers createLayer destroyLayer destroyLayers " +
+        "writeLayerToFile readLayerFromFile getEntities destroyEntity " +
+        "destroyEntities tryPickEntity writeEntityToFile createEntity " +
+        "readEntityFromFile reassignEntity trySetEntityOverlayNameOpt trySetEntityFacetNames " +
         "getEyeCenter setEyeCenter getEyeSize setEyeSize " +
         "getOmniScreenOpt setOmniScreenOpt getOmniScreen setOmniScreen " +
         "getSelectedScreenOpt setSelectedScreenOpt getSelectedScreen setSelectedScreen " +
         "getScreenTransitionDestinationOpt getViewBoundsRelative getViewBoundsAbsolute getViewBounds " +
         "isBoundsInView mouseToScreen mouseToWorld mouseToEntity " +
-        "getTickRate getTickRateF setTickRate resetTickTime " +
-        "incTickTime decTickTime getTickTime isTicking " +
-        "getUpdateCount getLiveness exit tryGetTextureSize " +
-        "getTextureSize tryGetTextureSizeF getTextureSizeF reloadSymbols"
+        "reloadSymbols getTickRate getTickRateF setTickRate " +
+        "resetTickTime incTickTime decTickTime getTickTime " +
+        "isTicking getUpdateCount getLiveness exit " +
+        "tryGetTextureSize getTextureSize tryGetTextureSizeF getTextureSizeF"
 
     let resolve relation world =
         let oldWorld = world
@@ -56,12 +57,33 @@ module WorldBindings =
                 match ScriptingSystem.tryExport typeof<Relation<Object>> relation world with
                 | Some value -> value :?> Relation<Object>
                 | None -> failwith "Invalid argument type for 'relation'; expecting a value convertable to Relation`1."
-            let result = World.resolveGeneric relation world
+            let result = World.resolveGeneralized relation world
             let value = result
             let value = ScriptingSystem.tryImport typeof<Address<Object>> value world |> Option.get
             struct (value, world)
         with exn ->
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'resolve' due to: " + scstring exn, None)
+            struct (violation, World.choose oldWorld)
+
+    let relate address world =
+        let oldWorld = world
+        try
+            let struct (address, world) =
+                let context = World.getScriptContext world
+                match World.evalInternal address world with
+                | struct (Scripting.String str, world)
+                | struct (Scripting.Keyword str, world) ->
+                    let relation = Relation.makeFromString str
+                    let address = Relation.resolve context.SimulantAddress relation
+                    struct (address, world)
+                | struct (Scripting.Violation (_, error, _), _) -> failwith error
+                | struct (_, _) -> failwith "Address must be either a String or Keyword."
+            let result = World.relateGeneralized address world
+            let value = result
+            let value = ScriptingSystem.tryImport typeof<Relation<Object>> value world |> Option.get
+            struct (value, world)
+        with exn ->
+            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'relate' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
     let reloadAssets world =
@@ -953,6 +975,60 @@ module WorldBindings =
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'isKeyboardKeyDown' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
+    let expandContent setScreenSplash guidOpt content origin parent world =
+        let oldWorld = world
+        try
+            let setScreenSplash =
+                match ScriptingSystem.tryExport typeof<FSharpFunc<FSharpOption<SplashData>, FSharpFunc<Screen, FSharpFunc<Screen, FSharpFunc<World, World>>>>> setScreenSplash world with
+                | Some value -> value :?> FSharpFunc<FSharpOption<SplashData>, FSharpFunc<Screen, FSharpFunc<Screen, FSharpFunc<World, World>>>>
+                | None -> failwith "Invalid argument type for 'setScreenSplash'; expecting a value convertable to FSharpFunc`2."
+            let guidOpt =
+                match ScriptingSystem.tryExport typeof<FSharpOption<Guid>> guidOpt world with
+                | Some value -> value :?> FSharpOption<Guid>
+                | None -> failwith "Invalid argument type for 'guidOpt'; expecting a value convertable to FSharpOption`1."
+            let content =
+                match ScriptingSystem.tryExport typeof<SimulantContent> content world with
+                | Some value -> value :?> SimulantContent
+                | None -> failwith "Invalid argument type for 'content'; expecting a value convertable to SimulantContent."
+            let origin =
+                match ScriptingSystem.tryExport typeof<ContentOrigin> origin world with
+                | Some value -> value :?> ContentOrigin
+                | None -> failwith "Invalid argument type for 'origin'; expecting a value convertable to ContentOrigin."
+            let struct (parent, world) =
+                let context = World.getScriptContext world
+                match World.evalInternal parent world with
+                | struct (Scripting.String str, world)
+                | struct (Scripting.Keyword str, world) ->
+                    let relation = Relation.makeFromString str
+                    let address = Relation.resolve context.SimulantAddress relation
+                    struct (World.derive address, world)
+                | struct (Scripting.Violation (_, error, _), _) -> failwith error
+                | struct (_, _) -> failwith "Relation must be either a String or Keyword."
+            let result = World.expandContent setScreenSplash guidOpt content origin parent world
+            struct (Scripting.Unit, result)
+        with exn ->
+            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'expandContent' due to: " + scstring exn, None)
+            struct (violation, World.choose oldWorld)
+
+    let destroy simulant world =
+        let oldWorld = world
+        try
+            let struct (simulant, world) =
+                let context = World.getScriptContext world
+                match World.evalInternal simulant world with
+                | struct (Scripting.String str, world)
+                | struct (Scripting.Keyword str, world) ->
+                    let relation = Relation.makeFromString str
+                    let address = Relation.resolve context.SimulantAddress relation
+                    struct (World.derive address, world)
+                | struct (Scripting.Violation (_, error, _), _) -> failwith error
+                | struct (_, _) -> failwith "Relation must be either a String or Keyword."
+            let result = World.destroy simulant world
+            struct (Scripting.Unit, result)
+        with exn ->
+            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'destroy' due to: " + scstring exn, None)
+            struct (violation, World.choose oldWorld)
+
     let getSelected simulant world =
         let oldWorld = world
         try
@@ -1331,6 +1407,35 @@ module WorldBindings =
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'getLayers' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
+    let createLayer dispatcherName nameOpt screen world =
+        let oldWorld = world
+        try
+            let dispatcherName =
+                match ScriptingSystem.tryExport typeof<String> dispatcherName world with
+                | Some value -> value :?> String
+                | None -> failwith "Invalid argument type for 'dispatcherName'; expecting a value convertable to String."
+            let nameOpt =
+                match ScriptingSystem.tryExport typeof<FSharpOption<String>> nameOpt world with
+                | Some value -> value :?> FSharpOption<String>
+                | None -> failwith "Invalid argument type for 'nameOpt'; expecting a value convertable to FSharpOption`1."
+            let struct (screen, world) =
+                let context = World.getScriptContext world
+                match World.evalInternal screen world with
+                | struct (Scripting.String str, world)
+                | struct (Scripting.Keyword str, world) ->
+                    let relation = Relation.makeFromString str
+                    let address = Relation.resolve context.SimulantAddress relation
+                    struct (Screen address, world)
+                | struct (Scripting.Violation (_, error, _), _) -> failwith error
+                | struct (_, _) -> failwith "Relation must be either a String or Keyword."
+            let result = World.createLayer4 dispatcherName nameOpt screen world
+            let (value, world) = result
+            let value = let str = scstring value in if Symbol.shouldBeExplicit str then Scripting.String str else Scripting.Keyword str
+            struct (value, world)
+        with exn ->
+            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'createLayer' due to: " + scstring exn, None)
+            struct (violation, World.choose oldWorld)
+
     let destroyLayer layer world =
         let oldWorld = world
         try
@@ -1694,35 +1799,6 @@ module WorldBindings =
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'trySetEntityFacetNames' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
-    let createLayer dispatcherName nameOpt screen world =
-        let oldWorld = world
-        try
-            let dispatcherName =
-                match ScriptingSystem.tryExport typeof<String> dispatcherName world with
-                | Some value -> value :?> String
-                | None -> failwith "Invalid argument type for 'dispatcherName'; expecting a value convertable to String."
-            let nameOpt =
-                match ScriptingSystem.tryExport typeof<FSharpOption<String>> nameOpt world with
-                | Some value -> value :?> FSharpOption<String>
-                | None -> failwith "Invalid argument type for 'nameOpt'; expecting a value convertable to FSharpOption`1."
-            let struct (screen, world) =
-                let context = World.getScriptContext world
-                match World.evalInternal screen world with
-                | struct (Scripting.String str, world)
-                | struct (Scripting.Keyword str, world) ->
-                    let relation = Relation.makeFromString str
-                    let address = Relation.resolve context.SimulantAddress relation
-                    struct (Screen address, world)
-                | struct (Scripting.Violation (_, error, _), _) -> failwith error
-                | struct (_, _) -> failwith "Relation must be either a String or Keyword."
-            let result = World.createLayer4 dispatcherName nameOpt screen world
-            let (value, world) = result
-            let value = let str = scstring value in if Symbol.shouldBeExplicit str then Scripting.String str else Scripting.Keyword str
-            struct (value, world)
-        with exn ->
-            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'createLayer' due to: " + scstring exn, None)
-            struct (violation, World.choose oldWorld)
-
     let getEyeCenter world =
         let oldWorld = world
         try
@@ -2003,6 +2079,17 @@ module WorldBindings =
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'mouseToEntity' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
+    let reloadSymbols world =
+        let oldWorld = world
+        try
+            let result = World.reloadSymbols world
+            let value = result
+            let value = ScriptingSystem.tryImport typeof<Void> value world |> Option.get
+            struct (value, world)
+        with exn ->
+            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'reloadSymbols' due to: " + scstring exn, None)
+            struct (violation, World.choose oldWorld)
+
     let getTickRate world =
         let oldWorld = world
         try
@@ -2178,23 +2265,23 @@ module WorldBindings =
             let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'getTextureSizeF' due to: " + scstring exn, None)
             struct (violation, World.choose oldWorld)
 
-    let reloadSymbols world =
-        let oldWorld = world
-        try
-            let result = World.reloadSymbols world
-            let value = result
-            let value = ScriptingSystem.tryImport typeof<Void> value world |> Option.get
-            struct (value, world)
-        with exn ->
-            let violation = Scripting.Violation (["InvalidBindingInvocation"], "Could not invoke binding 'reloadSymbols' due to: " + scstring exn, None)
-            struct (violation, World.choose oldWorld)
-
     let evalResolveBinding fnName exprs originOpt world =
         let struct (evaleds, world) = World.evalManyInternal exprs world
         match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
         | None ->
             match evaleds with
             | [|relation|] -> resolve relation world
+            | _ ->
+                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
+                struct (violation, world)
+        | Some violation -> struct (violation, world)
+
+    let evalRelateBinding fnName exprs originOpt world =
+        let struct (evaleds, world) = World.evalManyInternal exprs world
+        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
+        | None ->
+            match evaleds with
+            | [|address|] -> relate address world
             | _ ->
                 let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
                 struct (violation, world)
@@ -2783,6 +2870,28 @@ module WorldBindings =
                 struct (violation, world)
         | Some violation -> struct (violation, world)
 
+    let evalExpandContentBinding fnName exprs originOpt world =
+        let struct (evaleds, world) = World.evalManyInternal exprs world
+        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
+        | None ->
+            match evaleds with
+            | [|setScreenSplash; guidOpt; content; origin; parent|] -> expandContent setScreenSplash guidOpt content origin parent world
+            | _ ->
+                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
+                struct (violation, world)
+        | Some violation -> struct (violation, world)
+
+    let evalDestroyBinding fnName exprs originOpt world =
+        let struct (evaleds, world) = World.evalManyInternal exprs world
+        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
+        | None ->
+            match evaleds with
+            | [|simulant|] -> destroy simulant world
+            | _ ->
+                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
+                struct (violation, world)
+        | Some violation -> struct (violation, world)
+
     let evalGetSelectedBinding fnName exprs originOpt world =
         let struct (evaleds, world) = World.evalManyInternal exprs world
         match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
@@ -3003,6 +3112,17 @@ module WorldBindings =
                 struct (violation, world)
         | Some violation -> struct (violation, world)
 
+    let evalCreateLayerBinding fnName exprs originOpt world =
+        let struct (evaleds, world) = World.evalManyInternal exprs world
+        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
+        | None ->
+            match evaleds with
+            | [|dispatcherName; nameOpt; screen|] -> createLayer dispatcherName nameOpt screen world
+            | _ ->
+                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
+                struct (violation, world)
+        | Some violation -> struct (violation, world)
+
     let evalDestroyLayerBinding fnName exprs originOpt world =
         let struct (evaleds, world) = World.evalManyInternal exprs world
         match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
@@ -3152,17 +3272,6 @@ module WorldBindings =
         | None ->
             match evaleds with
             | [|facetNames; entity|] -> trySetEntityFacetNames facetNames entity world
-            | _ ->
-                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
-                struct (violation, world)
-        | Some violation -> struct (violation, world)
-
-    let evalCreateLayerBinding fnName exprs originOpt world =
-        let struct (evaleds, world) = World.evalManyInternal exprs world
-        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
-        | None ->
-            match evaleds with
-            | [|dispatcherName; nameOpt; screen|] -> createLayer dispatcherName nameOpt screen world
             | _ ->
                 let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
                 struct (violation, world)
@@ -3388,6 +3497,17 @@ module WorldBindings =
                 struct (violation, world)
         | Some violation -> struct (violation, world)
 
+    let evalReloadSymbolsBinding fnName exprs originOpt world =
+        let struct (evaleds, world) = World.evalManyInternal exprs world
+        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
+        | None ->
+            match evaleds with
+            | [||] -> reloadSymbols  world
+            | _ ->
+                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
+                struct (violation, world)
+        | Some violation -> struct (violation, world)
+
     let evalGetTickRateBinding fnName exprs originOpt world =
         let struct (evaleds, world) = World.evalManyInternal exprs world
         match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
@@ -3553,17 +3673,6 @@ module WorldBindings =
                 struct (violation, world)
         | Some violation -> struct (violation, world)
 
-    let evalReloadSymbolsBinding fnName exprs originOpt world =
-        let struct (evaleds, world) = World.evalManyInternal exprs world
-        match Array.tryFind (function Scripting.Violation _ -> true | _ -> false) evaleds with
-        | None ->
-            match evaleds with
-            | [||] -> reloadSymbols  world
-            | _ ->
-                let violation = Scripting.Violation (["InvalidBindingInvocation"], "Incorrect number of arguments for binding '" + fnName + "' at:\n" + SymbolOrigin.tryPrint originOpt, None)
-                struct (violation, world)
-        | Some violation -> struct (violation, world)
-
     let tryGetBinding fnName =
         match WorldScripting.Bindings.TryGetValue fnName with
         | (true, binding) -> Some binding
@@ -3573,6 +3682,7 @@ module WorldBindings =
         let bindings =
             [
              ("resolve", { Fn = evalResolveBinding; Pars = [|"relation"|]; DocOpt = None })
+             ("relate", { Fn = evalRelateBinding; Pars = [|"address"|]; DocOpt = None })
              ("reloadAssets", { Fn = evalReloadAssetsBinding; Pars = [||]; DocOpt = None })
              ("tryGetIsSelectedScreenIdling", { Fn = evalTryGetIsSelectedScreenIdlingBinding; Pars = [||]; DocOpt = None })
              ("tryGetIsSelectedScreenTransitioning", { Fn = evalTryGetIsSelectedScreenTransitioningBinding; Pars = [||]; DocOpt = None })
@@ -3626,6 +3736,8 @@ module WorldBindings =
              ("getMousePosition", { Fn = evalGetMousePositionBinding; Pars = [||]; DocOpt = None })
              ("getMousePositionF", { Fn = evalGetMousePositionFBinding; Pars = [||]; DocOpt = None })
              ("isKeyboardKeyDown", { Fn = evalIsKeyboardKeyDownBinding; Pars = [|"scanCode"|]; DocOpt = None })
+             ("expandContent", { Fn = evalExpandContentBinding; Pars = [|"setScreenSplash"; "guidOpt"; "content"; "origin"; "parent"|]; DocOpt = None })
+             ("destroy", { Fn = evalDestroyBinding; Pars = [|"simulant"|]; DocOpt = None })
              ("getSelected", { Fn = evalGetSelectedBinding; Pars = [|"simulant"|]; DocOpt = None })
              ("tryGetParent", { Fn = evalTryGetParentBinding; Pars = [|"simulant"|]; DocOpt = None })
              ("getParent", { Fn = evalGetParentBinding; Pars = [|"simulant"|]; DocOpt = None })
@@ -3646,6 +3758,7 @@ module WorldBindings =
              ("writeScreenToFile", { Fn = evalWriteScreenToFileBinding; Pars = [|"filePath"; "screen"|]; DocOpt = None })
              ("readScreenFromFile", { Fn = evalReadScreenFromFileBinding; Pars = [|"filePath"; "nameOpt"|]; DocOpt = None })
              ("getLayers", { Fn = evalGetLayersBinding; Pars = [|"screen"|]; DocOpt = None })
+             ("createLayer", { Fn = evalCreateLayerBinding; Pars = [|"dispatcherName"; "nameOpt"; "screen"|]; DocOpt = None })
              ("destroyLayer", { Fn = evalDestroyLayerBinding; Pars = [|"layer"|]; DocOpt = None })
              ("destroyLayers", { Fn = evalDestroyLayersBinding; Pars = [|"layers"|]; DocOpt = None })
              ("writeLayerToFile", { Fn = evalWriteLayerToFileBinding; Pars = [|"filePath"; "layer"|]; DocOpt = None })
@@ -3660,7 +3773,6 @@ module WorldBindings =
              ("reassignEntity", { Fn = evalReassignEntityBinding; Pars = [|"entity"; "nameOpt"; "layer"|]; DocOpt = None })
              ("trySetEntityOverlayNameOpt", { Fn = evalTrySetEntityOverlayNameOptBinding; Pars = [|"overlayNameOpt"; "entity"|]; DocOpt = None })
              ("trySetEntityFacetNames", { Fn = evalTrySetEntityFacetNamesBinding; Pars = [|"facetNames"; "entity"|]; DocOpt = None })
-             ("createLayer", { Fn = evalCreateLayerBinding; Pars = [|"dispatcherName"; "nameOpt"; "screen"|]; DocOpt = None })
              ("getEyeCenter", { Fn = evalGetEyeCenterBinding; Pars = [||]; DocOpt = None })
              ("setEyeCenter", { Fn = evalSetEyeCenterBinding; Pars = [|"value"|]; DocOpt = None })
              ("getEyeSize", { Fn = evalGetEyeSizeBinding; Pars = [||]; DocOpt = None })
@@ -3681,6 +3793,7 @@ module WorldBindings =
              ("mouseToScreen", { Fn = evalMouseToScreenBinding; Pars = [|"mousePosition"|]; DocOpt = None })
              ("mouseToWorld", { Fn = evalMouseToWorldBinding; Pars = [|"viewType"; "mousePosition"|]; DocOpt = None })
              ("mouseToEntity", { Fn = evalMouseToEntityBinding; Pars = [|"viewType"; "entityPosition"; "mousePosition"|]; DocOpt = None })
+             ("reloadSymbols", { Fn = evalReloadSymbolsBinding; Pars = [||]; DocOpt = None })
              ("getTickRate", { Fn = evalGetTickRateBinding; Pars = [||]; DocOpt = None })
              ("getTickRateF", { Fn = evalGetTickRateFBinding; Pars = [||]; DocOpt = None })
              ("setTickRate", { Fn = evalSetTickRateBinding; Pars = [|"tickRate"|]; DocOpt = None })
@@ -3696,7 +3809,6 @@ module WorldBindings =
              ("getTextureSize", { Fn = evalGetTextureSizeBinding; Pars = [|"assetTag"|]; DocOpt = None })
              ("tryGetTextureSizeF", { Fn = evalTryGetTextureSizeFBinding; Pars = [|"assetTag"|]; DocOpt = None })
              ("getTextureSizeF", { Fn = evalGetTextureSizeFBinding; Pars = [|"assetTag"|]; DocOpt = None })
-             ("reloadSymbols", { Fn = evalReloadSymbolsBinding; Pars = [||]; DocOpt = None })
             ] |>
             dictPlus
         WorldScripting.Bindings <- bindings

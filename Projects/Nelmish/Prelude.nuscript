@@ -1,5 +1,5 @@
 ; Nu Game Engine.
-; Copyright (C) Bryan Edds, 2013-2018.
+; Copyright (C) Bryan Edds, 2013-2020.
 
 #| The Unit type indicator.             |# [define -u- []]
 #| The Bool type indicator.             |# [define -b- false]
@@ -375,8 +375,8 @@
 [define stream [event]
     [toData [streamEvent event]]]
 
-; Equate two simulant's properties.
-[define equate [simulant property simulant2 property2]
+; Fix one simulant's property equal to another.
+[define fix [simulant property simulant2 property2]
     [setAsStream simulant property [getAsStream simulant2 property2]]]
 
 ; The game.

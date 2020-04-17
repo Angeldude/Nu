@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 #I __SOURCE_DIRECTORY__
 #load "Interactive.fsx"
@@ -7,7 +7,7 @@ open System
 open System.IO
 open System.Reflection
 open Prime
-open global.Nu
+open Nu
 
 type ParameterConversionDetails =
     | NormalParameter of Type
@@ -39,7 +39,7 @@ type FunctionBinding =
       FunctionReturn : ReturnConversion }
 
 let getExtrinsicKeywords () =
-    "v2 v4 v2i get getAsStream set setAsStream update streamEvent stream equate " +
+    "v2 v4 v2i get getAsStream set setAsStream update streamEvent stream fix " +
     "self parent grandparent game toData monitor"
 
 let getParameterConversion (ty : Type) =
@@ -300,8 +300,8 @@ let generateBindingFunction' binding =
 let generateTryGetBinding () =
     "    let tryGetBinding fnName =\n" +
     "        match WorldScripting.Bindings.TryGetValue fnName with\n" +
-    "        | (true, binding) -> FOption.some binding\n" +
-    "        | (false, _) -> FOption.none ()\n"
+    "        | (true, binding) -> Some binding\n" +
+    "        | (false, _) -> None\n"
 
 let generateInitBindings bindings =
 
@@ -343,7 +343,7 @@ let generateBindingsCode bindings =
 
     let header =
         "// Nu Game Engine.\n" +
-        "// Copyright (C) Bryan Edds, 2013-2018.\n" +
+        "// Copyright (C) Bryan Edds, 2013-2020.\n" +
         "\n" +
         "//*********************************************************************************************//\n" +
         "//                                                                                             //\n" +
@@ -354,7 +354,7 @@ let generateBindingsCode bindings =
         "namespace Nu\n" +
         "open System\n" +
         "open Prime\n" +
-        "open global.Nu\n" +
+        "open Nu\n" +
         "\n" +
         "[<RequireQualifiedAccess>]\n" +
         "module WorldBindings =\n" +
@@ -390,13 +390,13 @@ let types =
     AppDomain.CurrentDomain.GetAssemblies () |>
     Array.filter (fun asm -> (asm.GetName ()).Name = "Nu") |>
     Array.head |>
-    fun asm -> asm.GetTypes () |> Array.filter (fun ty -> isNotNull (ty.GetCustomAttribute<ModuleBindingAttribute> ()))
+    fun asm -> asm.GetTypes () |> Array.filter (fun ty -> notNull (ty.GetCustomAttribute<ModuleBindingAttribute> ()))
 
 let bindings =
     types |>
     Array.map (fun (ty : Type) -> ty.GetMethods ()) |>
     Array.concat |>
-    Array.filter (fun mi -> isNotNull (mi.GetCustomAttribute<FunctionBindingAttribute> ())) |>
+    Array.filter (fun mi -> notNull (mi.GetCustomAttribute<FunctionBindingAttribute> ())) |>
     Array.map tryGenerateBinding |>
     Array.definitize // TODO: error output
 

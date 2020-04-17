@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -13,47 +13,26 @@ module WorldGameModule =
     type Game with
 
         member this.GetDispatcher world = World.getGameDispatcher world
-        member this.Dispatcher = lensOut Property? Dispatcher this.GetDispatcher this
+        member this.Dispatcher = lensReadOnly Property? Dispatcher this.GetDispatcher this
         member this.GetOmniScreenOpt world = World.getOmniScreenOpt world
         member this.SetOmniScreenOpt value world = World.setOmniScreenOpt value world
         member this.OmniScreenOpt = lens Property? OmniScreenOpt this.GetOmniScreenOpt this.SetOmniScreenOpt this
         member this.GetSelectedScreenOpt world = World.getSelectedScreenOpt world
-        member this.SelectedScreenOpt = lensOut Property? SelectedScreenOpt this.GetSelectedScreenOpt this
+        member this.SelectedScreenOpt = lensReadOnly Property? SelectedScreenOpt this.GetSelectedScreenOpt this
         member this.GetScreenTransitionDestinationOpt world = World.getScreenTransitionDestinationOpt world
-        member this.ScreenTransitionDestinationOpt = lensOut Property? ScreenTransitionDestinationOpt this.GetScreenTransitionDestinationOpt this
+        member this.ScreenTransitionDestinationOpt = lensReadOnly Property? ScreenTransitionDestinationOpt this.GetScreenTransitionDestinationOpt this
         member this.GetEyeCenter world = World.getEyeCenter world
         member this.SetEyeCenter value world = World.setEyeCenter value world
         member this.EyeCenter = lens Property? EyeCenter this.GetEyeCenter this.SetEyeCenter this
         member this.GetEyeSize world = World.getEyeSize world
         member this.SetEyeSize value world = World.setEyeSize value world
         member this.EyeSize = lens Property? EyeSize this.GetEyeSize this.SetEyeSize this
-        member this.GetScriptOpt world = World.getGameScriptOpt world
-        member this.SetScriptOpt value world = World.setGameScriptOpt value world
-        member this.ScriptOpt = lens Property? ScriptOpt this.GetScriptOpt this.SetScriptOpt this
-        member this.GetScript world = World.getGameScript world
-        member this.SetScript value world = World.setGameScript value world
-        member this.Script = lens Property? Script this.GetScript this.SetScript this
         member this.GetScriptFrame world = World.getGameScriptFrame world
-        member this.ScriptFrame = lensOut Property? Script this.GetScriptFrame this
-        member internal this.GetScriptUnsubscriptions world = World.getGameScriptUnsubscriptions world
-        member internal this.SetScriptUnsubscriptions value world = World.setGameScriptUnsubscriptions value world
-        member internal this.ScriptUnsubscriptions = lens Property? ScriptUnsubscriptions this.GetScriptUnsubscriptions this.SetScriptUnsubscriptions this
-        member this.GetOnRegister world = World.getGameOnRegister world
-        member this.SetOnRegister value world = World.setGameOnRegister value world
-        member this.OnRegister = lens Property? OnRegister this.GetOnRegister this.SetOnRegister this
-        member this.GetOnUnregister world = World.getGameOnUnregister world
-        member this.SetOnUnregister value world = World.setGameOnUnregister value world
-        member this.OnUnregister = lens Property? OnUnregister this.GetOnUnregister this.SetOnUnregister this
-        member this.GetOnUpdate world = World.getGameOnUpdate world
-        member this.SetOnUpdate value world = World.setGameOnUpdate value world
-        member this.OnUpdate = lens Property? OnUpdate this.GetOnUpdate this.SetOnUpdate this
-        member this.GetOnPostUpdate world = World.getGameOnPostUpdate world
-        member this.SetOnPostUpdate value world = World.setGameOnPostUpdate value world
-        member this.OnPostUpdate = lens Property? OnPostUpdate this.GetOnPostUpdate this.SetOnPostUpdate this
+        member this.ScriptFrame = lensReadOnly Property? Script this.GetScriptFrame this
         member this.GetCreationTimeStamp world = World.getGameCreationTimeStamp world
-        member this.CreationTimeStamp = lensOut Property? CreationTimeStamp this.GetCreationTimeStamp this
+        member this.CreationTimeStamp = lensReadOnly Property? CreationTimeStamp this.GetCreationTimeStamp this
         member this.GetId world = World.getGameId world
-        member this.Id = lensOut Property? Id this.GetId this
+        member this.Id = lensReadOnly Property? Id this.GetId this
 
         member this.ChangeEvent propertyName = Events.Change propertyName --> this
         member this.RegisterEvent = Events.Register --> this
@@ -149,7 +128,10 @@ module WorldGameModule =
         member this.DispatchesAs<'a> world = this.DispatchesAs (typeof<'a>, world)
 
         /// Resolve a relation in the context of a game.
-        member this.Resolve relation = Game (Relation.resolve this.GameAddress relation)
+        member this.Resolve relation = resolve<Game> this relation
+
+        /// Relate a game to a simulant.
+        member this.Relate simulant = relate<Game> this simulant
 
         /// Get a game's change event address.
         member this.GetChangeEvent propertyName = Events.Change propertyName --> this.GameAddress
@@ -159,31 +141,14 @@ module WorldGameModule =
 
     type World with
 
-        static member private gameOnRegisterChanged _ world =
-            let world = World.unregisterGame world
-            World.registerGame world
-
-        static member private gameScriptOptChanged evt world =
-            let game = evt.Subscriber : Game
-            match game.GetScriptOpt world with
-            | Some script ->
-                let symbolLoadMetadata = { ImplicitDelimiters = true; StripCsvHeader = false }
-                match World.assetTagToValueOpt<Scripting.Expr array> script symbolLoadMetadata world with
-                | Some script -> game.SetScript script world
-                | None -> world
-            | None -> world
-
         static member internal registerGame world =
             let game = Default.Game
-            let world = World.monitor World.gameOnRegisterChanged (Events.Change Property? OnRegister) game world
-            let world = World.monitor World.gameScriptOptChanged (Events.Change Property? ScriptOpt) game world
             let world =
                 World.withEventContext (fun world ->
                     let dispatcher = game.GetDispatcher world
                     let world = dispatcher.Register (game, world)
                     let eventTrace = EventTrace.record "World" "registerGame" EventTrace.empty
-                    let world = World.publish () (rtoa<unit> [|"Register"; "Event"|]) eventTrace game world
-                    World.eval (game.GetOnRegister world) (game.GetScriptFrame world) game world |> snd')
+                    World.publish () (rtoa<unit> [|"Register"; "Event"|]) eventTrace game world)
                     game
                     world
             World.choose world
@@ -195,7 +160,6 @@ module WorldGameModule =
                     let dispatcher = game.GetDispatcher world
                     let eventTrace = EventTrace.record "World" "unregisteringGame" EventTrace.empty
                     let world = World.publish () (rtoa<unit> [|"Unregistering"; "Event"|]) eventTrace game world
-                    let world = World.eval (game.GetOnUnregister world) (game.GetScriptFrame world) game world |> snd'
                     dispatcher.Unregister (game, world))
                     game
                     world
@@ -208,9 +172,6 @@ module WorldGameModule =
                 // update via dispatcher
                 let dispatcher = game.GetDispatcher world
                 let world = dispatcher.Update (game, world)
-
-                // run script update
-                let world = World.evalWithLogging (game.GetOnUpdate world) (game.GetScriptFrame world) game world |> snd'
 
                 // publish update event
                 let eventTrace = EventTrace.record "World" "updateGame" EventTrace.empty
@@ -226,9 +187,6 @@ module WorldGameModule =
                 // post-update via dispatcher
                 let dispatcher = game.GetDispatcher world
                 let world = dispatcher.PostUpdate (game, world)
-
-                // run script post-update
-                let world = World.evalWithLogging (game.GetOnPostUpdate world) (game.GetScriptFrame world) game world |> snd'
 
                 // publish post-update event
                 let eventTrace = EventTrace.record "World" "postUpdateGame" EventTrace.empty

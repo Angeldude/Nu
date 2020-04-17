@@ -1,0 +1,51 @@
+﻿namespace OmniBlade
+open System
+open Prime
+open Nu
+open Nu.Declarative
+open OmniBlade
+
+[<AutoOpen>]
+module OmniReticles =
+
+    type [<NoComparison>] ReticlesCommand =
+        | TargetCancel
+        | TargetSelect of CharacterIndex
+
+    type Entity with
+
+        member this.GetReticlesModel = this.GetModel<ReticlesModel>
+        member this.SetReticlesModel = this.SetModel<ReticlesModel>
+        member this.ReticlesModel = this.Model<ReticlesModel> ()
+        member this.TargetSelectEvent = Events.TargetSelect --> this
+
+    type ReticlesDispatcher () =
+        inherit GuiDispatcher<ReticlesModel, unit, ReticlesCommand> ({ Characters = Map.empty; AimType = NoAim })
+
+        static member Properties =
+            [define Entity.SwallowMouseLeft false
+             define Entity.Visible false]
+
+        override this.Command (_, command, rets, world) =
+            match command with
+            | TargetCancel -> just (World.publish () rets.CancelEvent [] rets world)
+            | TargetSelect index -> just (World.publish index rets.TargetSelectEvent [] rets world)
+
+        override this.Content (model, rets, _) =
+            let buttonName = rets.Name + "+" + "Cancel"
+            let button = rets.Parent / buttonName
+            [Content.button button.Name
+                [Entity.PositionLocal == v2 -32.0f -96.0f
+                 Entity.Size == v2 64.0f 64.0f
+                 Entity.UpImage == asset Assets.BattlePackage "CancelUp"
+                 Entity.DownImage == asset Assets.BattlePackage "CancelDown"
+                 Entity.ClickEvent ==> cmd TargetCancel]
+             Content.entities (model --> fun model -> CharacterModels.getTargets model.AimType model.Characters) $ fun index character world ->
+                let buttonName = rets.Name + "+" + "Reticle" + "+" + scstring index
+                let button = rets.Parent / buttonName
+                Content.button button.Name
+                    [Entity.Center <== character --> fun character -> character.Center
+                     Entity.Size == v2 128.0f 128.0f
+                     Entity.UpImage == asset Assets.BattlePackage "ReticleUp"
+                     Entity.DownImage == asset Assets.BattlePackage "ReticleDown"
+                     Entity.ClickEvent ==> cmd (TargetSelect (character.Get world).CharacterState.CharacterIndex)]]

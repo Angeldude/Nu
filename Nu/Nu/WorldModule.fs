@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -8,6 +8,54 @@ open System.Diagnostics
 open System.Reflection
 open Prime
 open Nu
+
+[<RequireQualifiedAccess>]
+module Default =
+
+    /// The default game. Always exists.
+    let Game = Game ()
+
+    /// The default screen - may or may not exist.
+    let Screen = Screen Constants.Engine.DefaultScreenName
+    
+    /// The default layer - may or may not exist.
+    let Layer = Screen / Constants.Engine.DefaultLayerName
+    
+    /// The default entity - may or may not exist.
+    let Entity = Layer / Constants.Engine.DefaultEntityName
+
+    /// The default 'dissolving' transition behavior of game's screens.
+    let DissolveData =
+        { IncomingTime = 20L
+          OutgoingTime = 30L
+          DissolveImage = AssetTag.make Assets.DefaultPackage "Image8" }
+
+    /// The default 'splashing' behavior of game's splash screen.
+    let SplashData =
+        { DissolveData = DissolveData
+          IdlingTime = 60L
+          SplashImage = AssetTag.make Assets.DefaultPackage "Image5" }
+
+[<AutoOpen>]
+module WorldModuleOperators =
+
+    /// Derive a screen from a name.
+    let ntos (screenName : string) =
+        Screen screenName
+
+    /// Resolve a relationship from a simulant.
+    let resolve<'t when 't :> Simulant> (simulant : Simulant) (relation : 't Relation) : 't =
+        let simulant2 = Relation.resolve<Simulant, 't> simulant.SimulantAddress relation
+        if  typeof<'t> = typeof<Entity> ||
+            typeof<'t> = typeof<Layer> ||
+            typeof<'t> = typeof<Screen> ||
+            typeof<'t> = typeof<Game> then
+            Activator.CreateInstance (typeof<'t>, simulant2) :?> 't
+        else failwithumf ()
+
+    /// Relate the second simulant to the first.
+    let relate<'t when 't :> Simulant> (simulant : Simulant) (simulant2 : 't) : 't Relation =
+        Relation.relate<Simulant, 't> simulant.SimulantAddress (atoa simulant2.SimulantAddress)
 
 [<AutoOpen; ModuleBinding>]
 module WorldModule =
@@ -55,8 +103,23 @@ module WorldModule =
     /// F# reach-around for unsubscribing script subscriptions of simulants.
     let mutable internal unsubscribeSimulantScripts : Simulant -> World -> World =
         Unchecked.defaultof<_>
+        
+    /// F# reach-around for fixing properties.
+    /// HACK: fix5 allows the use of fake lenses in declarative usage.
+    /// NOTE: the downside to using fake lenses is that composed fake lenses do not function.
+    let mutable internal fix5 : Simulant -> World Lens -> World Lens -> bool -> World -> World =
+        Unchecked.defaultof<_>
 
-    let mutable internal equate5 : string -> Simulant -> World Lens -> bool -> World -> World =
+    let mutable internal register : Simulant -> World -> World =
+        Unchecked.defaultof<_>
+
+    let mutable internal unregister : Simulant -> World -> World =
+        Unchecked.defaultof<_>
+
+    let mutable internal expandContent : (SplashData option -> Screen -> Screen -> World -> World) -> Guid option -> SimulantContent -> ContentOrigin -> Simulant -> World -> World =
+        Unchecked.defaultof<_>
+
+    let mutable internal destroy : Simulant -> World -> World =
         Unchecked.defaultof<_>
 
     let mutable internal trySignalFacet : obj -> string -> Simulant -> World -> World =

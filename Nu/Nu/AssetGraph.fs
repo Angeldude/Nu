@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -38,7 +38,7 @@ type 'a AssetTag =
         member this.AssetName = this.AssetName
         end
 
-[<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
 module AssetTag =
 
     let make<'a> packageName assetName : AssetTag<'a> =
@@ -66,7 +66,7 @@ type [<StructuralEquality; NoComparison>] 'a Asset =
       Refinements : Refinement list
       Associations : string Set }
 
-[<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
 module Asset =
 
     let make<'a> assetTag filePath refinements associations : Asset<'a> =
@@ -88,12 +88,12 @@ module Asset =
 ///
 /// In order for the renderer to render a single texture, that texture, along with all the other
 /// assets in the corresponding package, must be loaded. Also, the only way to unload any of those
-/// assets is to send an AssetPackageUnload message to the renderer, which unloads them all. There
-/// is an AssetPackageLoad message to load a package when convenient.
+/// assets is to send an AssetPackageUnload message to the relevent subsystem, which unloads them all.
+/// There is an AssetPackageLoad message to load a package when convenient.
 ///
-/// The use of a message system for the renderer should enable streamed loading, optionally with
-/// smooth fading-in of late-loaded assets (IE - assets that are already in the view frustum but are
-/// still being loaded).
+/// The use of a message system for the subsystem should enable streamed loading, optionally with
+/// smooth fading-in of late-loaded assets (IE - render assets that are already in the view frustum
+/// but are still being loaded).
 ///
 /// Finally, the use of AssetPackages could enforce assets to be loaded in order of size and will
 /// avoid unnecessary Large Object Heap fragmentation.
@@ -131,7 +131,7 @@ module AssetGraphModule =
             { FilePathOpt : string option
               PackageDescriptors : Map<string, PackageDescriptor> }
     
-    [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
     module AssetGraph =
     
         let private getAssetExtension2 rawAssetExtension refinement =

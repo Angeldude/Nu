@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -21,7 +21,7 @@ module SymbolStoreModule =
         private
             { SymbolPackages : (SymbolLoadMetadata * Symbol) Packages }
 
-    [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
     module SymbolStore =
 
         let private tryLoadSymbol3 metadata packageName (asset : Symbol Asset) =

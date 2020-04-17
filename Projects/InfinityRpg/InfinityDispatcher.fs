@@ -2,7 +2,6 @@
 open System
 open Prime
 open Nu
-open Nu.Declarative
 open InfinityRpg
 
 [<AutoOpen>]
@@ -44,7 +43,7 @@ module InfinityDispatcherModule =
              Simulants.Gameplay.OutgoingStartEvent => cmd FadeSong
              Simulants.HudBack.ClickEvent => cmd ShowTitle]
 
-        override this.Command (command, _, _, world) =
+        override this.Command (_, command, _, world) =
             let world =
                 match command with
                 | PlayTitleSong -> World.playSong 0 1.0f Assets.ButterflyGirlSong world

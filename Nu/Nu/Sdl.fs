@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -58,7 +58,7 @@ module SdlDepsModule =
             member this.Dispose () =
                 this.Destroy ()
 
-    [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
     module SdlDeps =
     
         /// An empty SdlDeps.
@@ -143,6 +143,7 @@ module SdlDepsModule =
                                 | Left error -> Left error
                                 | Right ((), destroy) ->
                                     GamepadState.init ()
+                                    SDL.SDL_RaiseWindow window
                                     Right { RenderContextOpt = Some renderContext; WindowOpt = Some window; Config = sdlConfig; Destroy = destroy }
                                     
 type SdlDeps = SdlDepsModule.SdlDeps

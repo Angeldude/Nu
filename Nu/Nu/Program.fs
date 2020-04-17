@@ -1,10 +1,9 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
 open Prime
-open global.Nu
 module Program =
 
     (* DISCUSSION - On Nu's authoring story...
@@ -29,7 +28,7 @@ module Program =
     interactions    | F# (chains)               | Visual Studio
     subsystems      | F#                        | Visual Studio
     components      | F# (facets / dispatchers) | Visual Studio
-    elmish / MMC    | F# (facets / dispatchers) | Visual Studio
+    elmish / MVU    | F# (facets / dispatchers) | Visual Studio
 
     The advantages and limitations that fall out of this is as such -
 

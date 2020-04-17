@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -38,7 +38,7 @@ module OverlayerModule =
               ExtrinsicOverlays : Overlay list
               Overlays : Map<string, Overlay> }
 
-    [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
     module Overlayer =
 
         let rec private getOverlaySymbols2 overlayName overlayer =
@@ -144,7 +144,7 @@ module OverlayerModule =
                                 let recordProperties = targetType.GetProperties ()
                                 if Array.notExists (fun (property : PropertyInfo) -> property.Name = propertyName) recordProperties then
                                     match propertySymbol with
-                                    | Symbols ([Text (str, _); _], _) when isNotNull (Type.GetType str) ->
+                                    | Symbols ([Text (str, _); _], _) when notNull (Type.GetType str) ->
                                         let propertyType = typeof<DesignerProperty>
                                         match getPropertyState propertyName propertyType target oldOverlaySymbols with
                                         | Bare | Overlaid ->

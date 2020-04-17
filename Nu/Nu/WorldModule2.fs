@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -10,7 +10,7 @@ open System.Threading.Tasks
 #endif
 open SDL2
 open Prime
-open global.Nu
+open Nu
 
 [<AutoOpen; ModuleBinding>]
 module WorldModule2 =
@@ -66,10 +66,21 @@ module WorldModule2 =
             let address = Relation.resolve scriptContext.SimulantAddress relation
             address
 
-        /// Resolve a Simulant relation to an address in the current script context.
+        /// Resolve a relation to an address in the current script context.
         [<FunctionBinding "resolve">]
-        static member resolveGeneric (relation : obj Relation) world =
+        static member resolveGeneralized (relation : obj Relation) world =
             World.resolve relation world
+    
+        /// Relate an address to the current script context.
+        static member relate address world =
+            let scriptContext = World.getScriptContext world
+            let address = Relation.relate scriptContext.SimulantAddress address
+            address
+
+        /// Relate an address to the current script context.
+        [<FunctionBinding "relate">]
+        static member relateGeneralized (address : obj Address) world =
+            World.relate address world
 
         /// Send a message to the renderer to reload its rendering assets.
         [<FunctionBinding>]
@@ -626,6 +637,7 @@ module WorldModule2 =
                     world
                     entities
 
+#if !DISABLE_POST_UPDATES
             // post-update simulants breadth-first
             let world = World.postUpdateGame world
             let world = List.fold (fun world screen -> World.postUpdateScreen screen world) world screens
@@ -637,6 +649,7 @@ module WorldModule2 =
                     else world)
                     world
                     entities
+#endif
 
             // fin
             world
@@ -855,16 +868,6 @@ module WorldModule2 =
 #endif
             result
 
-        /// Run the game engine with the given handlers.
-        static member run handleAttemptMakeWorld worldConfig =
-            match SdlDeps.attemptMake worldConfig.SdlConfig with
-            | Right sdlDeps ->
-                use sdlDeps = sdlDeps // bind explicitly to dispose automatically
-                match handleAttemptMakeWorld sdlDeps worldConfig with
-                | Right world -> World.run4 tautology sdlDeps Running world
-                | Left error -> Log.trace error; Constants.Engine.FailureExitCode
-            | Left error -> Log.trace error; Constants.Engine.FailureExitCode
-
 [<AutoOpen>]
 module GameDispatcherModule =
 
@@ -873,7 +876,7 @@ module GameDispatcherModule =
         static member internal signalGame<'model, 'message, 'command> signal (game : Game) world =
             match game.GetDispatcher world with
             | :? GameDispatcher<'model, 'message, 'command> as dispatcher ->
-                Signal.processSignal signal dispatcher.Message dispatcher.Command (game.Model<'model> ()) game world
+                Signal.processSignal dispatcher.Message dispatcher.Command (game.Model<'model> ()) signal game world
             | _ ->
                 Log.info "Failed to send signal to game."
                 world
@@ -897,11 +900,11 @@ module GameDispatcherModule =
             let model = this.Get<DesignerProperty> Property? Model world
             this.Set<DesignerProperty> Property? Model { model with DesignerValue = value } world
 
-        member this.UpdateModel<'model> updater world =
-            this.SetModel<'model> (updater this.GetModel<'model> world) world
-
         member this.Model<'model> () =
             lens<'model> Property? Model this.GetModel<'model> this.SetModel<'model> this
+
+        member this.UpdateModel<'model> updater world =
+            this.SetModel<'model> (updater (this.GetModel<'model> world)) world
 
         member this.Signal<'model, 'message, 'command> signal world =
             World.signalGame<'model, 'message, 'command> signal this world
@@ -921,12 +924,30 @@ module GameDispatcherModule =
         override this.Register (game, world) =
             let (model, world) = World.attachModel initial Property? Model game world
             let bindings = this.Bindings (model, game, world)
-            let world = Signal.processBindings bindings this.Message this.Command (this.Model game) game world
+            let world = Signal.processBindings this.Message this.Command (this.Model game) bindings game world
             let content = this.Content (this.Model game, game, world)
-            List.foldi (fun contentIndex world content ->
-                let (screen, world) = World.expandScreenContent World.setScreenSplash content game game world
-                if contentIndex = 0 then World.selectScreen screen world else world)
-                world content
+            let world =
+                List.foldi (fun contentIndex world content ->
+                    let (screen, world) = World.expandScreenContent World.setScreenSplash content (SimulantOrigin game) game world
+                    if contentIndex = 0 then World.selectScreen screen world else world)
+                    world content
+            let initializers = this.Initializers (this.Model game, game, world)
+            List.fold (fun world initializer ->
+                match initializer with
+                | PropertyDefinition def ->
+                    let propertyName = def.PropertyName
+                    let alwaysPublish = Reflection.isPropertyAlwaysPublishByName propertyName
+                    let nonPersistent = not (Reflection.isPropertyPersistentByName propertyName)
+                    let property = { PropertyType = def.PropertyType; PropertyValue = PropertyExpr.eval def.PropertyExpr world }
+                    World.setProperty def.PropertyName alwaysPublish nonPersistent property game world
+                | EventHandlerDefinition (handler, partialAddress) ->
+                    let eventAddress = partialAddress --> game
+                    World.monitor (fun (evt : Event) world ->
+                        WorldModule.trySignal (handler evt) game world)
+                        eventAddress (game :> Simulant) world
+                | FixDefinition (left, right, breaking) ->
+                    WorldModule.fix5 game left right breaking world)
+                world initializers
 
         override this.Actualize (game, world) =
             let views = this.View (this.GetModel game world, game, world)
@@ -938,13 +959,16 @@ module GameDispatcherModule =
             | :? Signal<obj, 'command> as signal -> game.Signal<'model, 'message, 'command> (match signal with Command command -> cmd command | _ -> failwithumf ()) world
             | _ -> Log.info "Incorrect signal type returned from event binding."; world
 
+        abstract member Initializers : Lens<'model, World> * Game * World -> PropertyInitializer list
+        default this.Initializers (_, _, _) = []
+
         abstract member Bindings : 'model * Game * World -> Binding<'message, 'command, Game, World> list
         default this.Bindings (_, _, _) = []
 
-        abstract member Message : 'message * 'model * Game * World -> 'model * Signal<'message, 'command>
-        default this.Message (_, model, _, _) = just model
+        abstract member Message : 'model * 'message * Game * World -> 'model * Signal<'message, 'command>
+        default this.Message (model, _, _, _) = just model
 
-        abstract member Command : 'command * 'model * Game * World -> World * Signal<'message, 'command>
+        abstract member Command : 'model * 'command * Game * World -> World * Signal<'message, 'command>
         default this.Command (_, _, _, world) = just world
 
         abstract member Content : Lens<'model, World> * Game * World -> ScreenContent list

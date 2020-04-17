@@ -5,7 +5,7 @@
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>f1768f36-9ed3-4c36-9dce-9535aefb0732</ProjectGuid>
     <OutputType>Exe</OutputType>
@@ -18,7 +18,7 @@
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -26,26 +26,26 @@
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <PlatformTarget>AnyCPU</PlatformTarget>
     <DocumentationFile>bin\Debug\Nu.Gaia.XML</DocumentationFile>
     <Prefer32Bit>false</Prefer32Bit>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <OtherFlags>--warnon:1182</OtherFlags>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <Tailcalls>true</Tailcalls>
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <PlatformTarget>AnyCPU</PlatformTarget>
     <DocumentationFile>bin\Release\Nu.Gaia.XML</DocumentationFile>
     <Prefer32Bit>false</Prefer32Bit>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <OtherFlags>--warnon:1182</OtherFlags>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>
@@ -65,11 +65,10 @@
   <Import Project="$(FSharpTargetsPath)" Condition="Exists('$(FSharpTargetsPath)')" />
   <ItemGroup>
     <Compile Include="GaiaConstants.fs" />
-    <Compile Include="GaiaSimulants.fs" />
     <Compile Include="GaiaTypes.fs" />
     <Compile Include="GaiaEntity.fs" />
     <Compile Include="GaiaLayer.fs" />
-    <Compile Include="GaiaModule.fs" />
+    <Compile Include="Gaia.fs" />
     <Compile Include="Program.fs" />
     <None Include="Interactive.fsx" />
     <None Include="App.config" />
@@ -111,7 +110,10 @@
       <HintPath>..\Nu.Dependencies\Nito.Collections.Deque\Nito.Collections.Deque.dll</HintPath>
     </Reference>
     <Reference Include="Prime">
-      <HintPath>..\..\packages\Prime.4.1.0\lib\net472\Prime.exe</HintPath>
+      <HintPath>..\..\packages\Prime.5.1.0\lib\net472\Prime.dll</HintPath>
+    </Reference>
+    <Reference Include="Prime.Scripting">
+      <HintPath>..\..\packages\Prime.Scripting.5.1.0\lib\net472\Prime.Scripting.exe</HintPath>
     </Reference>
     <Reference Include="ScintillaNET">
       <HintPath>..\Nu.Dependencies\ScintillaNET\ScintillaNET.dll</HintPath>

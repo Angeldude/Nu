@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -13,7 +13,7 @@ module WorldScreenModule =
     type Screen with
     
         member this.GetDispatcher world = World.getScreenDispatcher this world
-        member this.Dispatcher = lensOut Property? Dispatcher this.GetDispatcher this
+        member this.Dispatcher = lensReadOnly Property? Dispatcher this.GetDispatcher this
         member this.GetTransitionState world = World.getScreenTransitionState this world
         member this.SetTransitionState value world = World.setScreenTransitionState value this world
         member this.TransitionState = lens Property? TransitionState this.GetTransitionState this.SetTransitionState this
@@ -28,34 +28,13 @@ module WorldScreenModule =
         member this.Outgoing = lens Property? Outgoing this.GetOutgoing this.SetOutgoing this
         member this.GetPersistent world = World.getScreenPersistent this world
         member this.SetPersistent value world = World.setScreenPersistent value this world
-        member this.Persistent = lensOut Property? Persistent this.GetPersistent this
-        member this.GetScriptOpt world = World.getScreenScriptOpt this world
-        member this.SetScriptOpt value world = World.setScreenScriptOpt value this world
-        member this.ScriptOpt = lens Property? ScriptOpt this.GetScriptOpt this.SetScriptOpt this
-        member this.GetScript world = World.getScreenScript this world
-        member this.SetScript value world = World.setScreenScript value this world
-        member this.Script = lens Property? Script this.GetScript this.SetScript this
+        member this.Persistent = lensReadOnly Property? Persistent this.GetPersistent this
         member this.GetScriptFrame world = World.getScreenScriptFrame this world
-        member this.ScriptFrame = lensOut Property? Script this.GetScriptFrame this
-        member internal this.GetScriptUnsubscriptions world = World.getScreenScriptUnsubscriptions this world
-        member internal this.SetScriptUnsubscriptions value world = World.setScreenScriptUnsubscriptions value this world
-        member internal this.ScriptUnsubscriptions = lens Property? ScriptUnsubscriptions this.GetScriptUnsubscriptions this.SetScriptUnsubscriptions this
-        member this.GetOnRegister world = World.getScreenOnRegister this world
-        member this.SetOnRegister value world = World.setScreenOnRegister value this world
-        member this.OnRegister = lens Property? OnRegister this.GetOnRegister this.SetOnRegister this
-        member this.GetOnUnregister world = World.getScreenOnUnregister this world
-        member this.SetOnUnregister value world = World.setScreenOnUnregister value this world
-        member this.OnUnregister = lens Property? OnUnregister this.GetOnUnregister this.SetOnUnregister this
-        member this.GetOnUpdate world = World.getScreenOnUpdate this world
-        member this.SetOnUpdate value world = World.setScreenOnUpdate value this world
-        member this.OnUpdate = lens Property? OnUpdate this.GetOnUpdate this.SetOnUpdate this
-        member this.GetOnPostUpdate world = World.getScreenOnPostUpdate this world
-        member this.SetOnPostUpdate value world = World.setScreenOnPostUpdate value this world
-        member this.OnPostUpdate = lens Property? OnPostUpdate this.GetOnPostUpdate this.SetOnPostUpdate this
+        member this.ScriptFrame = lensReadOnly Property? Script this.GetScriptFrame this
         member this.GetCreationTimeStamp world = World.getScreenCreationTimeStamp this world
-        member this.CreationTimeStamp = lensOut Property? CreationTimeStamp this.GetCreationTimeStamp this
+        member this.CreationTimeStamp = lensReadOnly Property? CreationTimeStamp this.GetCreationTimeStamp this
         member this.GetId world = World.getScreenId this world
-        member this.Id = lensOut Property? Id this.GetId this
+        member this.Id = lensReadOnly Property? Id this.GetId this
 
         member this.ChangeEvent propertyName = Events.Change propertyName --> this
         member this.RegisterEvent = Events.Register --> this
@@ -109,7 +88,10 @@ module WorldScreenModule =
         member this.DispatchesAs<'a> world = this.DispatchesAs (typeof<'a>, world)
 
         /// Resolve a relation in the context of a screen.
-        member this.Resolve relation = Screen (Relation.resolve this.ScreenAddress relation)
+        member this.Resolve relation = resolve<Screen> this relation
+
+        /// Relate a screen to a simulant.
+        member this.Relate simulant = relate<Screen> this simulant
 
         /// Get a screen's change event address.
         member this.GetChangeEvent propertyName = Events.Change propertyName --> this.ScreenAddress
@@ -126,9 +108,6 @@ module WorldScreenModule =
                 let dispatcher = World.getScreenDispatcher screen world
                 let world = dispatcher.Update (screen, world)
 
-                // run script update
-                let world = World.evalWithLogging (screen.GetOnUpdate world) (screen.GetScriptFrame world) screen world |> snd'
-
                 // publish update event
                 let eventTrace = EventTrace.record "World" "updateScreen" EventTrace.empty
                 World.publishPlus World.sortSubscriptionsByHierarchy () (Events.Update --> screen) eventTrace Default.Game true world)
@@ -142,9 +121,6 @@ module WorldScreenModule =
                 let dispatcher = World.getScreenDispatcher screen world
                 let world = dispatcher.PostUpdate (screen, world)
 
-                // run script post-update
-                let world = World.evalWithLogging (screen.GetOnPostUpdate world) (screen.GetScriptFrame world) screen world |> snd'
-                
                 // publish post-update event
                 let eventTrace = EventTrace.record "World" "postUpdateScreen" EventTrace.empty
                 World.publishPlus World.sortSubscriptionsByHierarchy () (Events.PostUpdate --> screen) eventTrace Default.Game true world)
@@ -204,6 +180,20 @@ module WorldScreenModule =
                 else World.addScreen false screenState screen world
             (screen, world)
 
+        /// Create a screen from a simulant descriptor.
+        static member createScreen2 descriptor world =
+            let (screen, world) =
+                World.createScreen3 descriptor.SimulantDispatcherName descriptor.SimulantNameOpt world
+            let world =
+                Map.fold (fun world propertyName property ->
+                    World.setScreenProperty propertyName property screen world)
+                    world descriptor.SimulantProperties
+            let world =
+                List.fold (fun world childDescriptor ->
+                    World.createLayer3 childDescriptor screen world |> snd)
+                    world descriptor.SimulantChildren
+            (screen, world)
+
         /// Create a screen and add it to the world.
         static member createScreen<'d when 'd :> ScreenDispatcher> nameOpt world =
             World.createScreen3 typeof<'d>.Name nameOpt world
@@ -231,8 +221,8 @@ module WorldScreenModule =
             screens |>
             Seq.sortBy (fun (screen : Screen) -> screen.GetCreationTimeStamp world) |>
             Seq.filter (fun (screen : Screen) -> screen.GetPersistent world) |>
-            Seq.fold (fun screenDescriptors screen -> World.writeScreen screen ScreenDescriptor.empty world :: screenDescriptors) gameDescriptor.Screens |>
-            fun screenDescriptors -> { gameDescriptor with Screens = screenDescriptors }
+            Seq.fold (fun screenDescriptors screen -> World.writeScreen screen ScreenDescriptor.empty world :: screenDescriptors) gameDescriptor.ScreenDescriptors |>
+            fun screenDescriptors -> { gameDescriptor with ScreenDescriptors = screenDescriptors }
 
         /// Write a screen to a file.
         [<FunctionBinding>]
@@ -257,7 +247,7 @@ module WorldScreenModule =
                     let screenNameOpt = ScreenDescriptor.getNameOpt screenDescriptor
                     let (screen, world) = World.readScreen screenDescriptor screenNameOpt world
                     (screen :: screens, world))
-                gameDescriptor.Screens
+                gameDescriptor.ScreenDescriptors
                 ([], world)
 
         /// Read a screen from a file.
@@ -281,8 +271,9 @@ module WorldScreenModule =
         /// Turn screen content into a live screen.
         static member expandScreenContent setScreenSplash content origin game world =
             match ScreenContent.expand content game world with
-            | Left (name, descriptor, handlers, equations, behavior, layerStreams, entityStreams, layerFilePaths, entityFilePaths, entityContents) ->
-                let (screen, world) = World.readScreen descriptor (Some name) world
+            | Left (_, descriptor, handlers, fixes, behavior, layerStreams, entityStreams, layerFilePaths, entityFilePaths, entityContents) ->
+                let (screen, world) =
+                    World.createScreen2 descriptor world
                 let world =
                     List.fold (fun world (_ : string, layerName, filePath) ->
                         World.readLayerFromFile filePath (Some layerName) screen world |> snd)
@@ -292,14 +283,15 @@ module WorldScreenModule =
                         World.readEntityFromFile filePath (Some entityName) (screen / layerName) world |> snd)
                         world entityFilePaths
                 let world =
-                    List.fold (fun world (name, simulant, property, breaking) ->
-                        WorldModule.equate5 name simulant property breaking world)
-                        world equations
+                    List.fold (fun world (simulant, left : World Lens, right, breaking) ->
+                        WorldModule.fix5 simulant left right breaking world)
+                        world fixes
                 let world =
                     List.fold (fun world (handler, address, simulant) ->
                         World.monitor (fun (evt : Event) world ->
                             let signal = handler evt
-                            WorldModule.trySignal signal origin world)
+                            let owner = match origin with SimulantOrigin simulant -> simulant | FacetOrigin (simulant, _) -> simulant
+                            WorldModule.trySignal signal owner world)
                             address simulant world)
                         world handlers
                 let world =
@@ -308,11 +300,11 @@ module WorldScreenModule =
                         world layerStreams
                 let world =
                     List.fold (fun world (layer, lens, indexerOpt, mapper) ->
-                        World.expandEntityStream lens indexerOpt mapper (SimulantOrigin origin) layer world)
+                        World.expandEntityStream lens indexerOpt mapper origin layer world)
                         world entityStreams
                 let world =
-                    List.fold (fun world (owner, entityContents) ->
-                        let layer = etol owner
+                    List.fold (fun world (owner : Entity, entityContents) ->
+                        let layer = owner.Parent
                         List.fold (fun world entityContent ->
                             World.expandEntityContent (Some Gen.id) entityContent (SimulantOrigin owner) layer world)
                             world entityContents)

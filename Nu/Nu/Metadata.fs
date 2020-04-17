@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -32,7 +32,7 @@ module MetadataModule =
         private
             { MetadataMap : UMap<string, UMap<string, AssetMetadata>> }
 
-    [<RequireQualifiedAccess; CompilationRepresentation (CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
     module Metadata =
 
         let private getTileSetProperties (tileSet : TmxTileset) =

@@ -3,7 +3,7 @@ open Prime
 open Nu
 
 // this is our Elm-style command type. To learn about the Elm-style, read this article here -
-// https://medium.com/@bryanedds/a-game-engine-that-allows-you-to-program-in-the-elm-style-31d806fbe27f
+// https://vsyncronicity.com/2020/03/01/a-game-engine-in-the-elm-style/
 type MyGameCommand =
     | ShowTitle
     | ShowCredits
@@ -15,7 +15,7 @@ type MyGameCommand =
 type MyGameDispatcher () =
     inherit GameDispatcher<unit, unit, MyGameCommand> ()
 
-    // here we define the Bindings used to connect events to their desired commands
+    // here we define the bindings used to connect events to their desired commands
     override this.Bindings (_, _, _) =
         [Simulants.TitleCredits.ClickEvent => cmd ShowCredits
          Simulants.TitlePlay.ClickEvent => cmd ShowGameplay
@@ -24,7 +24,7 @@ type MyGameDispatcher () =
          Simulants.Back.ClickEvent => cmd ShowTitle]
 
     // here we handle the above commands
-    override this.Command (command, _, _, world) =
+    override this.Command (_, command, _, world) =
         let world =
             match command with
             | ShowTitle -> World.transitionScreen Simulants.Title world

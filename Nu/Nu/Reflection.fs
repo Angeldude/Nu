@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -18,11 +18,14 @@ module Reflection =
     /// Check if a property with the given name should always publish a change event.
     let isPropertyAlwaysPublishByName propertyName =
         match propertyName with
-        | "ScriptOpt" // always publish certain script properties 
+        | "Model" // always publish certain script properties 
+        | "ParentNodeOpt"
+        | "ScriptOpt"
         | "Script"
-        | "OnRegister"
         | "EffectsOpt" -> true
-        | _ -> propertyName.EndsWith "Ap"
+        | _ ->
+            propertyName.EndsWith "Model" ||
+            propertyName.EndsWith "Ap"
 
     /// Is a property with the given name persistent?
     let isPropertyPersistentByName (propertyName : string) =
@@ -173,7 +176,7 @@ module Reflection =
             match Map.tryFind property.Name propertyDescriptors with
             | Some propertySymbol ->
                 match propertySymbol with
-                | Symbols ([Text (str, _); _], _) when isNotNull (Type.GetType str) ->
+                | Symbols ([Text (str, _); _], _) when notNull (Type.GetType str) ->
                     let converter = SymbolicConverter (false, None, property.PropertyType)
                     if converter.CanConvertFrom typeof<Symbol> then
                         let propertyValue = converter.ConvertFrom propertySymbol
@@ -212,7 +215,7 @@ module Reflection =
                 else Log.debug ("Cannot convert property '" + scstring propertySymbol + "' to type '" + propertyDefinition.PropertyType.Name + "'."); xtension
             | None ->
                 match propertySymbol with
-                | Symbols ([Text (str, _); _], _) when isNotNull (Type.GetType str) ->
+                | Symbols ([Text (str, _); _], _) when notNull (Type.GetType str) ->
                     let propertyType = typeof<DesignerProperty>
                     let converter = SymbolicConverter (false, None, propertyType)
                     if converter.CanConvertFrom typeof<Symbol> then
@@ -310,7 +313,8 @@ module Reflection =
         Seq.fold (fun propertyDescriptors (propertyName, (property : Property)) ->
             let propertyType = property.PropertyType
             let propertyValue = property.PropertyValue
-            if  isPropertyPersistentByName propertyName &&
+            if  propertyType <> typeof<ComputedProperty> &&
+                isPropertyPersistentByName propertyName &&
                 shouldWriteProperty propertyName propertyType propertyValue then
                 let converter = SymbolicConverter (false, None, propertyType)
                 let propertySymbol = converter.ConvertTo (propertyValue, typeof<Symbol>) :?> Symbol
@@ -513,7 +517,8 @@ module Reflection =
                                     let converter = SymbolicConverter (false, None, definition.PropertyType)
                                     let overlayProperty = converter.ConvertTo (value, typeof<Symbol>) :?> Symbol
                                     Map.add definition.PropertyName overlayProperty overlayProperties
-                                | VariableExpr _ -> overlayProperties)
+                                | VariableExpr _ -> overlayProperties
+                                | ComputedExpr _ -> overlayProperties)
                             definitions
                             Map.empty
                     let overlayProperties =

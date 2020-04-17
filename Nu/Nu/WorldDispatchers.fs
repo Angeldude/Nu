@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2018.
+// Copyright (C) Bryan Edds, 2013-2020.
 
 namespace Nu
 open System
@@ -47,7 +47,7 @@ module FacetModule =
             | Some (:? Facet<'model, 'message, 'command> as facet) ->
                 match signalObj with
                 | :? Signal<'message, 'command> as signal ->
-                    Signal.processSignal signal facet.Message facet.Command (entity.FacetModel<'model> facet.ModelName) entity world
+                    Signal.processSignal facet.Message facet.Command (entity.FacetModel<'model> facet.ModelName) signal entity world
                 | _ -> Log.info "Incorrect signal type returned from event binding."; world
             | _ -> Log.info "Failed to send signal to entity."; world
 
@@ -55,7 +55,7 @@ module FacetModule =
             let facets = entity.GetFacets world
             match Array.tryFind (fun facet -> getTypeName facet = facetName) facets with
             | Some (:? Facet<'model, 'message, 'command> as facet) ->
-                Signal.processSignal signal facet.Message facet.Command (entity.FacetModel<'model> facet.ModelName) entity world
+                Signal.processSignal facet.Message facet.Command (entity.FacetModel<'model> facet.ModelName) signal entity world
             | _ -> Log.info "Failed to send signal to entity."; world
 
     and Entity with
@@ -66,9 +66,14 @@ module FacetModule =
 
         member this.SetFacetModel<'model> modelName (value : 'model) world =
             let model = this.Get<DesignerProperty> modelName world
-            match this.GetImperative world with
-            | true -> model.DesignerValue <- value; world
-            | false -> this.Set<DesignerProperty> modelName { model with DesignerValue = value } world
+#if IMPERATIVE_ENTITIES
+            model.DesignerValue <- value
+            world
+#else
+            if this.GetImperative world
+            then model.DesignerValue <- value; world
+            else this.Set<DesignerProperty> modelName { model with DesignerValue = value } world
+#endif
 
         member this.UpdateFacetModel<'model> modelName updater world =
             this.SetFacetModel<'model> modelName (updater this.GetFacetModel<'model> modelName world) world
@@ -91,7 +96,7 @@ module FacetModule =
         member this.ModelName =
             if isNull modelNameOpt then modelNameOpt <- getTypeName this + "Model"
             modelNameOpt
-
+            
         member this.GetModel (entity : Entity) world : 'model =
             entity.GetFacetModel<'model> this.ModelName world
 
@@ -104,9 +109,29 @@ module FacetModule =
         override this.Register (entity, world) =
             let (model, world) = World.attachModel initial this.ModelName entity world
             let bindings = this.Bindings (model, entity, world)
-            let world = Signal.processBindings bindings this.Message this.Command (this.Model entity) entity world
+            let world = Signal.processBindings this.Message this.Command (this.Model entity) bindings entity world
             let content = this.Content (this.Model entity, entity, world)
-            List.fold (fun world content -> World.expandEntityContent None content (FacetOrigin (entity, getTypeName this)) (etol entity) world) world content
+            let world =
+                List.fold (fun world content ->
+                    World.expandEntityContent None content (FacetOrigin (entity, getTypeName this)) entity.Parent world)
+                    world content
+            let initializers = this.Initializers (this.Model entity, entity, world)
+            List.fold (fun world initializer ->
+                match initializer with
+                | PropertyDefinition def ->
+                    let propertyName = def.PropertyName
+                    let alwaysPublish = Reflection.isPropertyAlwaysPublishByName propertyName
+                    let nonPersistent = not (Reflection.isPropertyPersistentByName propertyName)
+                    let property = { PropertyType = def.PropertyType; PropertyValue = PropertyExpr.eval def.PropertyExpr world }
+                    World.setProperty def.PropertyName alwaysPublish nonPersistent property entity world
+                | EventHandlerDefinition (handler, partialAddress) ->
+                    let eventAddress = partialAddress --> entity
+                    World.monitor (fun (evt : Event) world ->
+                        WorldModule.trySignalFacet (handler evt) (getTypeName this) entity world)
+                        eventAddress (entity :> Simulant) world
+                | FixDefinition (left, right, breaking) ->
+                    WorldModule.fix5 entity left right breaking world)
+                world initializers
 
         override this.Actualize (entity, world) =
             let views = this.View (this.GetModel entity world, entity, world)
@@ -118,13 +143,16 @@ module FacetModule =
             | :? Signal<obj, 'command> as signal -> entity.SignalEntityFacet<'model, 'message, 'command> (match signal with Command command -> cmd command | _ -> failwithumf ()) (getTypeName this) world
             | _ -> Log.info "Incorrect signal type returned from event binding."; world
 
+        abstract member Initializers : Lens<'model, World> * Entity * World -> PropertyInitializer list
+        default this.Initializers (_, _, _) = []
+
         abstract member Bindings : 'model * Entity * World -> Binding<'message, 'command, Entity, World> list
         default this.Bindings (_, _, _) = []
 
-        abstract member Message : 'message * 'model * Entity * World -> 'model * Signal<'message, 'command>
-        default this.Message (_, model, _, _) = just model
+        abstract member Message : 'model * 'message * Entity * World -> 'model * Signal<'message, 'command>
+        default this.Message (model, _, _, _) = just model
 
-        abstract member Command : 'command * 'model * Entity * World -> World * Signal<'message, 'command>
+        abstract member Command : 'model * 'command * Entity * World -> World * Signal<'message, 'command>
         default this.Command (_, _, _, world) = just world
 
         abstract member Content : Lens<'model, World> * Entity * World -> EntityContent list
@@ -161,16 +189,16 @@ module EffectFacetModule =
         member this.EffectOffset = lens Property? EffectOffset this.GetEffectOffset this.SetEffectOffset this
         member this.GetEffectPhysicsShapes world : unit = this.Get Property? EffectPhysicsShapes world // NOTE: the default EffectFacet leaves it up to the Dispatcher to do something with the effect's physics output
         member private this.SetEffectPhysicsShapes (value : unit) world = this.SetFast Property? EffectPhysicsShapes false true value world
-        member this.EffectPhysicsShapes = lensOut Property? EffectPhysicsShapes this.GetEffectPhysicsShapes this
+        member this.EffectPhysicsShapes = lensReadOnly Property? EffectPhysicsShapes this.GetEffectPhysicsShapes this
         member this.GetEffectTags world : EffectTags = this.Get Property? EffectTags world
         member private this.SetEffectTags (value : EffectTags) world = this.SetFast Property? EffectTags false true value world
-        member this.EffectTags = lensOut Property? EffectTags this.GetEffectTags this
+        member this.EffectTags = lensReadOnly Property? EffectTags this.GetEffectTags this
         member this.GetEffectHistoryMax world : int = this.Get Property? EffectHistoryMax world
         member this.SetEffectHistoryMax (value : int) world = this.SetFast Property? EffectHistoryMax false false value world
         member this.EffectHistoryMax = lens Property? EffectHistoryMax this.GetEffectHistoryMax this.SetEffectHistoryMax this
         member this.GetEffectHistory world : Effects.Slice Deque = this.Get Property? EffectHistory world
         member private this.SetEffectHistory (value : Effects.Slice Deque) world = this.SetFast Property? EffectHistory false true value world
-        member this.EffectHistory = lensOut Property? EffectHistory this.GetEffectHistory this
+        member this.EffectHistory = lensReadOnly Property? EffectHistory this.GetEffectHistory this
         
         /// The start time of the effect, or zero if none.
         member this.GetEffectStartTime world =
@@ -281,24 +309,21 @@ module ScriptFacetModule =
         member this.GetScript world : Scripting.Expr array = this.Get Property? Script world
         member this.SetScript (value : Scripting.Expr array) world = this.SetFast Property? Script true false value world
         member this.Script = lens Property? Script this.GetScript this.SetScript this
-        member this.GetScriptFrame world : Scripting.DeclarationFrame = this.Get Property? ScriptFrame world
-        member internal this.SetScriptFrame (value : Scripting.DeclarationFrame) world = this.SetFast Property? ScriptFrame false true value world
-        member this.ScriptFrame = lensOut Property? ScriptFrame this.GetScriptFrame this
         member internal this.GetScriptUnsubscriptions world : Unsubscription list = this.Get Property? ScriptUnsubscriptions world
         member internal this.SetScriptUnsubscriptions (value : Unsubscription list) world = this.SetFast Property? ScriptUnsubscriptions false true value world
         member internal this.ScriptUnsubscriptions = lens Property? ScriptUnsubscriptions this.GetScriptUnsubscriptions this.SetScriptUnsubscriptions this
-        member this.GetOnRegister world : Scripting.Expr = this.Get Property? OnRegister world
-        member this.SetOnRegister (value : Scripting.Expr) world = this.SetFast Property? OnRegister true false value world
-        member this.OnRegister = lens Property? OnRegister this.GetOnRegister this.SetOnRegister this
-        member this.GetOnUnregister world : Scripting.Expr = this.Get Property? OnUnregister world
-        member this.SetOnUnregister (value : Scripting.Expr) world = this.SetFast Property? OnUnregister false false value world
-        member this.OnUnregister = lens Property? OnUnregister this.GetOnUnregister this.SetOnUnregister this
-        member this.GetOnUpdate world : Scripting.Expr = this.Get Property? OnUpdate world
-        member this.SetOnUpdate (value : Scripting.Expr) world = this.SetFast Property? OnUpdate false false value world
-        member this.OnUpdate = lens Property? OnUpdate this.GetOnUpdate this.SetOnUpdate this
-        member this.GetOnPostUpdate world : Scripting.Expr = this.Get Property? OnPostUpdate world
-        member this.SetOnPostUpdate (value : Scripting.Expr) world = this.SetFast Property? OnPostUpdate false false value world
-        member this.OnPostUpdate = lens Property? OnPostUpdate this.GetOnPostUpdate this.SetOnPostUpdate this
+        member this.GetRegisterScript world : Scripting.Expr = this.Get Property? RegisterScript world
+        member this.SetRegisterScript (value : Scripting.Expr) world = this.SetFast Property? RegisterScript true false value world
+        member this.RegisterScript = lens Property? RegisterScript this.GetRegisterScript this.SetRegisterScript this
+        member this.GetUnregisterScript world : Scripting.Expr = this.Get Property? UnregisterScript world
+        member this.SetUnregisterScript (value : Scripting.Expr) world = this.SetFast Property? UnregisterScript false false value world
+        member this.UnregisterScript = lens Property? UnregisterScript this.GetUnregisterScript this.SetUnregisterScript this
+        member this.GetUpdateScript world : Scripting.Expr = this.Get Property? UpdateScript world
+        member this.SetUpdateScript (value : Scripting.Expr) world = this.SetFast Property? UpdateScript false false value world
+        member this.UpdateScript = lens Property? UpdateScript this.GetUpdateScript this.SetUpdateScript this
+        member this.GetPostUpdateScript world : Scripting.Expr = this.Get Property? PostUpdateScript world
+        member this.SetPostUpdateScript (value : Scripting.Expr) world = this.SetFast Property? PostUpdateScript false false value world
+        member this.PostUpdateScript = lens Property? PostUpdateScript this.GetPostUpdateScript this.SetPostUpdateScript this
         member this.ChangeEvent propertyName = Events.Change propertyName --> this
         member this.RegisterEvent = Events.Register --> this
         member this.UnregisteringEvent = Events.Unregistering --> this
@@ -310,10 +335,10 @@ module ScriptFacetModule =
             let entity = evt.Subscriber : Entity
             let script = entity.GetScript world
             let scriptFrame = Scripting.DeclarationFrame HashIdentity.Structural
-            let world = entity.SetScriptFrame scriptFrame world
+            let world = World.setEntityScriptFrame scriptFrame entity world
             evalManyWithLogging script scriptFrame entity world |> snd'
 
-        static let handleOnRegisterChanged evt world =
+        static let handleRegisterScriptChanged evt world =
             let entity = evt.Subscriber : Entity
             let world = World.unregisterEntity entity world
             World.registerEntity entity world
@@ -322,27 +347,26 @@ module ScriptFacetModule =
             [define Entity.PublishChanges true
              define Entity.ScriptOpt None
              define Entity.Script [||]
-             define Entity.ScriptFrame (Scripting.DeclarationFrame HashIdentity.Structural)
              define Entity.ScriptUnsubscriptions []
-             define Entity.OnRegister Scripting.Unit
-             define Entity.OnUnregister Scripting.Unit
-             define Entity.OnUpdate Scripting.Unit
-             define Entity.OnPostUpdate Scripting.Unit]
+             define Entity.RegisterScript Scripting.Unit
+             define Entity.UnregisterScript Scripting.Unit
+             define Entity.UpdateScript Scripting.Unit
+             define Entity.PostUpdateScript Scripting.Unit]
 
         override this.Register (entity, world) =
-            let world = World.evalWithLogging (entity.GetOnRegister world) (entity.GetScriptFrame world) entity world |> snd'
+            let world = World.evalWithLogging (entity.GetRegisterScript world) (entity.GetScriptFrame world) entity world |> snd'
             let world = World.monitor handleScriptChanged (entity.GetChangeEvent Property? Script) entity world
-            let world = World.monitor handleOnRegisterChanged (entity.GetChangeEvent Property? OnRegister) entity world
+            let world = World.monitor handleRegisterScriptChanged (entity.GetChangeEvent Property? RegisterScript) entity world
             world
 
         override this.Unregister (entity, world) =
-            World.evalWithLogging (entity.GetOnUnregister world) (entity.GetScriptFrame world) entity world |> snd'
+            World.evalWithLogging (entity.GetUnregisterScript world) (entity.GetScriptFrame world) entity world |> snd'
 
         override this.Update (entity, world) =
-            World.evalWithLogging (entity.GetOnUpdate world) (entity.GetScriptFrame world) entity world |> snd'
+            World.evalWithLogging (entity.GetUpdateScript world) (entity.GetScriptFrame world) entity world |> snd'
 
         override this.PostUpdate (entity, world) =
-            World.evalWithLogging (entity.GetOnPostUpdate world) (entity.GetScriptFrame world) entity world |> snd'
+            World.evalWithLogging (entity.GetPostUpdateScript world) (entity.GetScriptFrame world) entity world |> snd'
 
 [<AutoOpen>]
 module TextFacetModule =
@@ -449,8 +473,8 @@ module RigidBodyFacetModule =
         member this.GetIsSensor world : bool = this.Get Property? IsSensor world
         member this.SetIsSensor (value : bool) world = this.SetFast Property? IsSensor false false value world
         member this.IsSensor = lens Property? IsSensor this.GetIsSensor this.SetIsSensor this
-        member this.GetPhysicsId world = { SourceId = this.GetId world; BodyId = Guid.Empty } // we hard-code the empty Guid here because we assume a singleton body
-        member this.PhysicsId = lensOut Property? PhysicsId this.GetPhysicsId this
+        member this.GetPhysicsId world : PhysicsId = this.Get Property? PhysicsId world
+        member this.PhysicsId = lensReadOnly Property? PhysicsId this.GetPhysicsId this
         member this.CollisionEvent = Events.Collision --> this
 
     type RigidBodyFacet () =
@@ -475,7 +499,8 @@ module RigidBodyFacetModule =
              define Entity.CollisionMask "@"
              define Entity.CollisionBody (BodyBox { Extent = Vector2 0.5f; Center = Vector2.Zero })
              define Entity.IsBullet false
-             define Entity.IsSensor false]
+             define Entity.IsSensor false
+             computed Entity.PhysicsId (fun (entity : Entity) world -> { SourceId = entity.GetId world; BodyId = Guid.Empty }) None]
 
         override this.RegisterPhysics (entity, world) =
             let bodyProperties = 
@@ -503,11 +528,6 @@ module RigidBodyFacetModule =
 
         override this.UnregisterPhysics (entity, world) =
             World.destroyBody (entity.GetPhysicsId world) world
-
-        override this.TryGetCalculatedProperty (name, entity, world) =
-            match name with
-            | "PhysicsId" -> Some { PropertyType = typeof<PhysicsId>; PropertyValue = entity.GetPhysicsId world }
-            | _ -> None
 
 [<AutoOpen>]
 module TileMapFacetModule =
@@ -559,7 +579,7 @@ module TileMapFacetModule =
 
         let getTileBodyProperties6 (tm : Entity) tmd tli td ti cexpr world =
             let tileShape = PhysicsEngine.localizeCollisionBody (Vector2 (single tmd.TileSize.X, single tmd.TileSize.Y)) cexpr
-            { BodyId = makeGuidFromInts tli ti
+            { BodyId = Gen.idFromInts tli ti
               Position =
                 Vector2
                     (single (td.TilePosition.X + tmd.TileSize.X / 2),
@@ -620,7 +640,7 @@ module TileMapFacetModule =
                     match tileData.TileSetTileOpt with
                     | Some tileSetTile ->
                         if tileSetTile.Properties.ContainsKey Constants.Physics.CollisionProperty then
-                            let physicsId = { SourceId = tileMap.GetId world; BodyId = makeGuidFromInts tileLayerIndex tileIndex }
+                            let physicsId = { SourceId = tileMap.GetId world; BodyId = Gen.idFromInts tileLayerIndex tileIndex }
                             physicsId :: physicsIds
                         else physicsIds
                     | None -> physicsIds)
@@ -719,7 +739,7 @@ module NodeFacetModule =
     type Entity with
     
         member this.GetParentNodeOpt world : Entity Relation option = this.Get Property? ParentNodeOpt world
-        member this.SetParentNodeOpt (value : Entity Relation option) world = this.SetFast Property? ParentNodeOpt false false value world
+        member this.SetParentNodeOpt (value : Entity Relation option) world = this.SetFast Property? ParentNodeOpt true false value world
         member this.ParentNodeOpt = lens Property? ParentNodeOpt this.GetParentNodeOpt this.SetParentNodeOpt this
         member this.GetPositionLocal world : Vector2 = this.Get Property? PositionLocal world
         member this.SetPositionLocal (value : Vector2) world = this.SetFast Property? PositionLocal false false value world
@@ -736,7 +756,10 @@ module NodeFacetModule =
         member private this.GetNodeUnsubscribe world : World -> World = this.Get Property? NodeUnsubscribe world
         member private this.SetNodeUnsubscribe (value : World -> World) world = this.SetFast Property? NodeUnsubscribe false true value world
         member private this.NodeUnsubscribe = lens Property? NodeUnsubscribe this.GetNodeUnsubscribe this.SetNodeUnsubscribe this
-        
+        member this.GetCenterLocal world : Vector2 = this.Get Property? CenterLocal world
+        member this.SetCenterLocal (value : Vector2) world = this.SetFast Property? CenterLocal false true value world
+        member this.CenterLocal = lens Property? CenterLocal this.GetCenterLocal this.SetCenterLocal this
+
         member this.SetParentNodeOptWithAdjustment (value : Entity Relation option) world =
             let world =
                 match (this.GetParentNodeOpt world, value) with
@@ -776,7 +799,7 @@ module NodeFacetModule =
                     else world
                 | (None, None) -> world
             this.SetParentNodeOpt value world
-        
+
         member this.GetChildNodes world =
             this.GetChildNodes2 [] world
 
@@ -821,6 +844,21 @@ module NodeFacetModule =
             | "Enabled" -> entity.SetEnabled (node.GetEnabled world && entity.GetEnabledLocal world) world
             | _ -> world
 
+        static let updateFromNode (node : Entity) (entity : Entity) world =
+            let world = updatePropertyFromNode "Position" node entity world
+            let world = updatePropertyFromNode "Depth" node entity world
+            let world = updatePropertyFromNode "Visible" node entity world
+            let world = updatePropertyFromNode "Enabled" node entity world
+            world
+
+        static let tryUpdateFromNode (entity : Entity) world =
+            match entity.GetParentNodeOpt world with
+            | Some nodeRelation ->
+                let node = entity.Resolve nodeRelation
+                let world = updateFromNode node entity world
+                world
+            | None -> world
+
         static let handleLocalPropertyChange evt world =
             let entity = evt.Subscriber : Entity
             let data = evt.Data : ChangeData
@@ -838,7 +876,7 @@ module NodeFacetModule =
             let data = evt.Data : ChangeData
             (Cascade, updatePropertyFromNode data.Name node entity world)
 
-        static let subscribeToNodePropertyChanges (entity : Entity) world =
+        static let trySubscribeToNodePropertyChanges (entity : Entity) world =
             let oldWorld = world
             let world = (entity.GetNodeUnsubscribe world) world
             match entity.GetParentNodeOpt world with
@@ -859,7 +897,10 @@ module NodeFacetModule =
             | None -> world
 
         static let handleNodeChange evt world =
-            subscribeToNodePropertyChanges evt.Subscriber world
+            let entity = evt.Subscriber
+            let world = tryUpdateFromNode entity world
+            let world = trySubscribeToNodePropertyChanges entity world
+            world
 
         static member Properties =
             [define Entity.ParentNodeOpt None
@@ -867,7 +908,10 @@ module NodeFacetModule =
              define Entity.DepthLocal 0.0f
              define Entity.VisibleLocal true
              define Entity.EnabledLocal true
-             define Entity.NodeUnsubscribe (id : World -> World)]
+             define Entity.NodeUnsubscribe (id : World -> World)
+             computed Entity.CenterLocal
+                (fun (entity : Entity) world -> entity.GetPosition world + entity.GetSize world * 0.5f)
+                (Some (fun value (entity : Entity) world -> entity.SetPosition (value - entity.GetSize world * 0.5f) world))]
 
         override this.Register (entity, world) =
             let world = entity.SetNodeUnsubscribe id world // ensure unsubscribe function reference doesn't get copied in Gaia...
@@ -876,16 +920,12 @@ module NodeFacetModule =
             let world = World.monitorPlus handleLocalPropertyChange entity.DepthLocal.ChangeEvent entity world |> snd
             let world = World.monitorPlus handleLocalPropertyChange entity.VisibleLocal.ChangeEvent entity world |> snd
             let world = World.monitorPlus handleLocalPropertyChange entity.EnabledLocal.ChangeEvent entity world |> snd
-            let world = subscribeToNodePropertyChanges entity world
+            let world = tryUpdateFromNode entity world
+            let world = trySubscribeToNodePropertyChanges entity world
             world
 
         override this.Unregister (entity, world) =
             (entity.GetNodeUnsubscribe world) world // NOTE: not sure if this is necessary.
-
-        override this.TryGetCalculatedProperty (propertyName, entity, world) =
-            match propertyName with
-            | "ParentNodeExists" -> Some { PropertyType = typeof<bool>; PropertyValue = entity.ParentNodeExists world }
-            | _ -> None
 
 [<AutoOpen>]
 module StaticSpriteFacetModule =
@@ -1012,7 +1052,7 @@ module EntityDispatcherModule =
         static member internal signalEntity<'model, 'message, 'command> signal (entity : Entity) world =
             match entity.GetDispatcher world with
             | :? EntityDispatcher<'model, 'message, 'command> as dispatcher ->
-                Signal.processSignal signal dispatcher.Message dispatcher.Command (entity.Model<'model> ()) entity world
+                Signal.processSignal dispatcher.Message dispatcher.Command (entity.Model<'model> ()) signal entity world
             | _ ->
                 Log.info "Failed to send signal to entity."
                 world
@@ -1025,15 +1065,20 @@ module EntityDispatcherModule =
 
         member this.SetModel<'model> (value : 'model) world =
             let model = this.Get<DesignerProperty> Property? Model world
-            match this.GetImperative world with
-            | true -> model.DesignerValue <- value; world
-            | false -> this.Set<DesignerProperty> Property? Model { model with DesignerValue = value } world
-
-        member this.UpdateModel<'model> updater world =
-            this.SetModel<'model> (updater this.GetModel<'model> world) world
+#if IMPERATIVE_ENTITIES
+            model.DesignerValue <- value
+            world
+#else
+            if this.GetImperative world
+            then model.DesignerValue <- value; world
+            else this.Set<DesignerProperty> Property? Model { model with DesignerValue = value } world
+#endif
 
         member this.Model<'model> () =
             lens<'model> Property? Model this.GetModel<'model> this.SetModel<'model> this
+
+        member this.UpdateModel<'model> updater world =
+            this.SetModel<'model> (updater (this.GetModel<'model> world)) world
 
         member this.Signal<'model, 'message, 'command> signal world =
             World.signalEntity<'model, 'message, 'command> signal this world
@@ -1053,9 +1098,29 @@ module EntityDispatcherModule =
         override this.Register (entity, world) =
             let (model, world) = World.attachModel initial Property? Model entity world
             let bindings = this.Bindings (model, entity, world)
-            let world = Signal.processBindings bindings this.Message this.Command (this.Model entity) entity world
+            let world = Signal.processBindings this.Message this.Command (this.Model entity) bindings entity world
             let content = this.Content (this.Model entity, entity, world)
-            List.fold (fun world content -> World.expandEntityContent None content (SimulantOrigin entity) (etol entity) world) world content
+            let world =
+                List.fold (fun world content ->
+                    World.expandEntityContent None content (SimulantOrigin entity) entity.Parent world)
+                    world content
+            let initializers = this.Initializers (this.Model entity, entity, world)
+            List.fold (fun world initializer ->
+                match initializer with
+                | PropertyDefinition def ->
+                    let propertyName = def.PropertyName
+                    let alwaysPublish = Reflection.isPropertyAlwaysPublishByName propertyName
+                    let nonPersistent = not (Reflection.isPropertyPersistentByName propertyName)
+                    let property = { PropertyType = def.PropertyType; PropertyValue = PropertyExpr.eval def.PropertyExpr world }
+                    World.setProperty def.PropertyName alwaysPublish nonPersistent property entity world
+                | EventHandlerDefinition (handler, partialAddress) ->
+                    let eventAddress = partialAddress --> entity
+                    World.monitor (fun (evt : Event) world ->
+                        WorldModule.trySignal (handler evt) entity world)
+                        eventAddress (entity :> Simulant) world
+                | FixDefinition (left, right, breaking) ->
+                    WorldModule.fix5 entity left right breaking world)
+                world initializers
 
         override this.Actualize (entity, world) =
             let views = this.View (this.GetModel entity world, entity, world)
@@ -1069,19 +1134,22 @@ module EntityDispatcherModule =
             | :? Signal<'message, obj> as signal -> entity.Signal<'model, 'message, 'command> (match signal with Message message -> msg message | _ -> failwithumf ()) world
             | :? Signal<obj, 'command> as signal -> entity.Signal<'model, 'message, 'command> (match signal with Command command -> cmd command | _ -> failwithumf ()) world
             | _ -> Log.info "Incorrect signal type returned from event binding."; world
+            
+        abstract member Initializers : Lens<'model, World> * Entity * World -> PropertyInitializer list
+        default this.Initializers (_, _, _) = []
 
         abstract member Bindings : 'model * Entity * World -> Binding<'message, 'command, Entity, World> list
         default this.Bindings (_, _, _) = []
 
-        abstract member Message : 'message * 'model * Entity * World -> 'model * Signal<'message, 'command>
-        default this.Message (_, model, _, _) = just model
+        abstract member Message : 'model * 'message * Entity * World -> 'model * Signal<'message, 'command>
+        default this.Message (model, _, _, _) = just model
 
-        abstract member Command : 'command * 'model * Entity * World -> World * Signal<'message, 'command>
+        abstract member Command : 'model * 'command * Entity * World -> World * Signal<'message, 'command>
         default this.Command (_, _, _, world) = just world
 
         abstract member Content : Lens<'model, World> * Entity * World -> EntityContent list
         default this.Content (_, _, _) = []
-        
+
         abstract member View : 'model * Entity * World -> View list
         default this.View (_, _, _) = []
 
@@ -1107,11 +1175,17 @@ module NodeDispatcherModule =
         static member Facets =
             [typeof<NodeFacet>]
 
+        static member Properties =
+            [define Entity.PublishChanges true]
+
     type [<AbstractClass>] NodeDispatcher<'model, 'message, 'command> (model) =
         inherit EntityDispatcher<'model, 'message, 'command> (model)
 
         static member Facets =
             [typeof<NodeFacet>]
+
+        static member Properties =
+            [define Entity.PublishChanges true]
 
 [<AutoOpen>]
 module GuiDispatcherModule =
@@ -1143,8 +1217,7 @@ module GuiDispatcherModule =
             (handling, world)
 
         static member Facets =
-            [typeof<NodeFacet>
-             typeof<ScriptFacet>]
+            [typeof<NodeFacet>]
 
         static member Properties =
             [define Entity.PublishChanges true
@@ -1176,8 +1249,7 @@ module GuiDispatcherModule =
             (handling, world)
 
         static member Facets =
-            [typeof<NodeFacet>
-             typeof<ScriptFacet>]
+            [typeof<NodeFacet>]
 
         static member Properties =
             [define Entity.PublishChanges true
@@ -1209,9 +1281,6 @@ module ButtonDispatcherModule =
         member this.GetClickSoundOpt world : Audio AssetTag option = this.Get Property? ClickSoundOpt world
         member this.SetClickSoundOpt (value : Audio AssetTag option) world = this.SetFast Property? ClickSoundOpt false false value world
         member this.ClickSoundOpt = lens Property? ClickSoundOpt this.GetClickSoundOpt this.SetClickSoundOpt this
-        member this.GetOnClick world : Scripting.Expr = this.Get Property? OnClick world
-        member this.SetOnClick (value : Scripting.Expr) world = this.SetFast Property? OnClick false false value world
-        member this.OnClick = lens Property? OnClick this.GetOnClick this.SetOnClick this
         member this.UpEvent = Events.Up --> this
         member this.DownEvent = Events.Down --> this
         member this.ClickEvent = Events.Click --> this
@@ -1249,7 +1318,6 @@ module ButtonDispatcherModule =
                         let world = World.publish () (Events.Up --> button) eventTrace button world
                         let eventTrace = EventTrace.record4 "ButtonDispatcher" "handleMouseLeftUp" "Click" EventTrace.empty
                         let world = World.publish () (Events.Click --> button) eventTrace button world
-                        let world = World.evalWithLogging (button.GetOnClick world) (button.GetScriptFrame world) button world |> snd'
                         let world =
                             match button.GetClickSoundOpt world with
                             | Some clickSound -> World.playSound 1.0f clickSound world
@@ -1268,8 +1336,7 @@ module ButtonDispatcherModule =
              define Entity.Down false
              define Entity.UpImage (AssetTag.make<Image> Assets.DefaultPackage "Image")
              define Entity.DownImage (AssetTag.make<Image> Assets.DefaultPackage "Image2")
-             define Entity.ClickSoundOpt (Some (AssetTag.make<Audio> Assets.DefaultPackage "Sound"))
-             define Entity.OnClick Scripting.Unit]
+             define Entity.ClickSoundOpt (Some (AssetTag.make<Audio> Assets.DefaultPackage "Sound"))]
 
         override this.Register (button, world) =
             let world = World.monitorPlus handleMouseLeftDown Events.MouseLeftDown button world |> snd
@@ -1415,9 +1482,6 @@ module ToggleDispatcherModule =
         member this.GetToggleSoundOpt world : Audio AssetTag option = this.Get Property? ToggleSoundOpt world
         member this.SetToggleSoundOpt (value : Audio AssetTag option) world = this.SetFast Property? ToggleSoundOpt false false value world
         member this.ToggleSoundOpt = lens Property? ToggleSoundOpt this.GetToggleSoundOpt this.SetToggleSoundOpt this
-        member this.GetOnToggle world : Scripting.Expr = this.Get Property? OnToggle world
-        member this.SetOnToggle (value : Scripting.Expr) world = this.SetFast Property? OnToggle false false value world
-        member this.OnToggle = lens Property? OnToggle this.GetOnToggle this.SetOnToggle this
         member this.ToggleEvent = Events.Toggle --> this
 
     type ToggleDispatcher () =
@@ -1453,7 +1517,6 @@ module ToggleDispatcherModule =
                         let world = World.publish () (eventAddress --> toggle) eventTrace toggle world
                         let eventTrace = EventTrace.record4 "ToggleDispatcher" "handleMouseLeftUp" "Toggle" EventTrace.empty
                         let world = World.publish () (Events.Toggle --> toggle) eventTrace toggle world
-                        let world = World.evalWithLogging (toggle.GetOnToggle world) (toggle.GetScriptFrame world) toggle world |> snd'
                         let world =
                             match toggle.GetToggleSoundOpt world with
                             | Some toggleSound -> World.playSound 1.0f toggleSound world
@@ -1473,8 +1536,7 @@ module ToggleDispatcherModule =
              define Entity.Pressed false
              define Entity.OpenImage (AssetTag.make<Image> Assets.DefaultPackage "Image")
              define Entity.ClosedImage (AssetTag.make<Image> Assets.DefaultPackage "Image2")
-             define Entity.ToggleSoundOpt (Some (AssetTag.make<Audio> Assets.DefaultPackage "Sound"))
-             define Entity.OnToggle Scripting.Unit]
+             define Entity.ToggleSoundOpt (Some (AssetTag.make<Audio> Assets.DefaultPackage "Sound"))]
 
         override this.Register (toggle, world) =
             let world = World.monitorPlus handleMouseLeftDown Events.MouseLeftDown toggle world |> snd
@@ -1560,12 +1622,6 @@ module FeelerDispatcherModule =
         member this.GetTouched world : bool = this.Get Property? Touched world
         member this.SetTouched (value : bool) world = this.SetFast Property? Touched false false value world
         member this.Touched = lens Property? Touched this.GetTouched this.SetTouched this
-        member this.GetOnTouch world : Scripting.Expr = this.Get Property? OnTouch world
-        member this.SetOnTouch (value : Scripting.Expr) world = this.SetFast Property? OnTouch false false value world
-        member this.OnTouch = lens Property? OnTouch this.GetOnTouch this.SetOnTouch this
-        member this.GetOnUntouch world : Scripting.Expr = this.Get Property? OnUntouch world
-        member this.SetOnUntouch (value : Scripting.Expr) world = this.SetFast Property? OnUntouch false false value world
-        member this.OnUntouch = lens Property? OnUntouch this.GetOnUntouch this.SetOnUntouch this
         member this.TouchEvent = Events.Touch --> this
         member this.UntouchEvent = Events.Untouch --> this
 
@@ -1583,7 +1639,6 @@ module FeelerDispatcherModule =
                         let world = feeler.SetTouched true world
                         let eventTrace = EventTrace.record "FeelerDispatcher" "handleMouseLeftDown" EventTrace.empty
                         let world = World.publish data.Position (Events.Touch --> feeler) eventTrace feeler world
-                        let world = World.evalWithLogging (feeler.GetOnTouch world) (feeler.GetScriptFrame world) feeler world |> snd'
                         (Resolve, world)
                     else (Resolve, world)
                 else (Cascade, world)
@@ -1597,7 +1652,6 @@ module FeelerDispatcherModule =
                     let world = feeler.SetTouched false world
                     let eventTrace = EventTrace.record "FeelerDispatcher" "handleMouseLeftDown" EventTrace.empty
                     let world = World.publish data.Position (Events.Untouch --> feeler) eventTrace feeler world
-                    let world = World.evalWithLogging (feeler.GetOnUntouch world) (feeler.GetScriptFrame world) feeler world |> snd'
                     (Resolve, world)
                 else (Resolve, world)
             else (Cascade, world)
@@ -1605,9 +1659,7 @@ module FeelerDispatcherModule =
         static member Properties =
             [define Entity.Size (Vector2 (256.0f, 64.0f))
              define Entity.SwallowMouseLeft false
-             define Entity.Touched false
-             define Entity.OnTouch Scripting.Unit
-             define Entity.OnUntouch Scripting.Unit]
+             define Entity.Touched false]
 
         override this.Register (feeler, world) =
             let world = World.monitorPlus handleMouseLeftDown Events.MouseLeftDown feeler world |> snd
@@ -1843,7 +1895,7 @@ module LayerDispatcherModule =
         static member internal signalLayer<'model, 'message, 'command> signal (layer : Layer) world =
             match layer.GetDispatcher world with
             | :? LayerDispatcher<'model, 'message, 'command> as dispatcher ->
-                Signal.processSignal signal dispatcher.Message dispatcher.Command (layer.Model<'model> ()) layer world
+                Signal.processSignal dispatcher.Message dispatcher.Command (layer.Model<'model> ()) signal layer world
             | _ ->
                 Log.info "Failed to send signal to layer."
                 world
@@ -1858,11 +1910,11 @@ module LayerDispatcherModule =
             let model = this.Get<DesignerProperty> Property? Model world
             this.Set<DesignerProperty> Property? Model { model with DesignerValue = value } world
 
-        member this.UpdateModel<'model> updater world =
-            this.SetModel<'model> (updater this.GetModel<'model> world) world
-
         member this.Model<'model> () =
             lens<'model> Property? Model this.GetModel<'model> this.SetModel<'model> this
+
+        member this.UpdateModel<'model> updater world =
+            this.SetModel<'model> (updater (this.GetModel<'model> world)) world
 
         member this.Signal<'model, 'message, 'command> signal world =
             World.signalLayer<'model, 'message, 'command> signal this world
@@ -1882,9 +1934,29 @@ module LayerDispatcherModule =
         override this.Register (layer, world) =
             let (model, world) = World.attachModel initial Property? Model layer world
             let bindings = this.Bindings (model, layer, world)
-            let world = Signal.processBindings bindings this.Message this.Command (this.Model layer) layer world
+            let world = Signal.processBindings this.Message this.Command (this.Model layer) bindings layer world
             let content = this.Content (this.Model layer, layer, world)
-            List.fold (fun world content -> World.expandEntityContent None content (SimulantOrigin layer) layer world) world content
+            let world =
+                List.fold (fun world content ->
+                    World.expandEntityContent None content (SimulantOrigin layer) layer world)
+                    world content
+            let initializers = this.Initializers (this.Model layer, layer, world)
+            List.fold (fun world initializer ->
+                match initializer with
+                | PropertyDefinition def ->
+                    let propertyName = def.PropertyName
+                    let alwaysPublish = Reflection.isPropertyAlwaysPublishByName propertyName
+                    let nonPersistent = not (Reflection.isPropertyPersistentByName propertyName)
+                    let property = { PropertyType = def.PropertyType; PropertyValue = PropertyExpr.eval def.PropertyExpr world }
+                    World.setProperty def.PropertyName alwaysPublish nonPersistent property layer world
+                | EventHandlerDefinition (handler, partialAddress) ->
+                    let eventAddress = partialAddress --> layer
+                    World.monitor (fun (evt : Event) world ->
+                        WorldModule.trySignal (handler evt) layer world)
+                        eventAddress (layer :> Simulant) world
+                | FixDefinition (left, right, breaking) ->
+                    WorldModule.fix5 layer left right breaking world)
+                world initializers
 
         override this.Actualize (layer, world) =
             let views = this.View (this.GetModel layer world, layer, world)
@@ -1896,13 +1968,16 @@ module LayerDispatcherModule =
             | :? Signal<obj, 'command> as signal -> layer.Signal<'model, 'message, 'command> (match signal with Command command -> cmd command | _ -> failwithumf ()) world
             | _ -> Log.info "Incorrect signal type returned from event binding."; world
 
+        abstract member Initializers : Lens<'model, World> * Layer * World -> PropertyInitializer list
+        default this.Initializers (_, _, _) = []
+
         abstract member Bindings : 'model * Layer * World -> Binding<'message, 'command, Layer, World> list
         default this.Bindings (_, _, _) = []
 
-        abstract member Message : 'message * 'model * Layer * World -> 'model * Signal<'message, 'command>
-        default this.Message (_, model, _, _) = just model
+        abstract member Message : 'model * 'message * Layer * World -> 'model * Signal<'message, 'command>
+        default this.Message (model, _, _, _) = just model
 
-        abstract member Command : 'command * 'model * Layer * World -> World * Signal<'message, 'command>
+        abstract member Command : 'model * 'command * Layer * World -> World * Signal<'message, 'command>
         default this.Command (_, _, _, world) = just world
 
         abstract member Content : Lens<'model, World> * Layer * World -> EntityContent list
@@ -1919,7 +1994,7 @@ module ScreenDispatcherModule =
         static member internal signalScreen<'model, 'message, 'command> signal (screen : Screen) world =
             match screen.GetDispatcher world with
             | :? ScreenDispatcher<'model, 'message, 'command> as dispatcher ->
-                Signal.processSignal signal dispatcher.Message dispatcher.Command (screen.Model<'model> ()) screen world
+                Signal.processSignal dispatcher.Message dispatcher.Command (screen.Model<'model> ()) signal screen world
             | _ ->
                 Log.info "Failed to send signal to screen."
                 world
@@ -1934,11 +2009,11 @@ module ScreenDispatcherModule =
             let model = this.Get<DesignerProperty> Property? Model world
             this.Set<DesignerProperty> Property? Model { model with DesignerValue = value } world
 
-        member this.UpdateModel<'model> updater world =
-            this.SetModel<'model> (updater this.GetModel<'model> world) world
-
         member this.Model<'model> () =
             lens<'model> Property? Model this.GetModel<'model> this.SetModel<'model> this
+
+        member this.UpdateModel<'model> updater world =
+            this.SetModel<'model> (updater (this.GetModel<'model> world)) world
 
         member this.Signal<'model, 'message, 'command> signal world =
             World.signalScreen<'model, 'message, 'command> signal this world
@@ -1958,10 +2033,29 @@ module ScreenDispatcherModule =
         override this.Register (screen, world) =
             let (model, world) = World.attachModel initial Property? Model screen world
             let bindings = this.Bindings (model, screen, world)
-            let world = Signal.processBindings bindings this.Message this.Command (this.Model screen) screen world
+            let world = Signal.processBindings this.Message this.Command (this.Model screen) bindings screen world
             let content = this.Content (this.Model screen, screen, world)
-            let world = List.fold (fun world content -> World.expandLayerContent None content screen screen world) world content
-            world
+            let world =
+                List.fold (fun world content ->
+                    World.expandLayerContent None content (SimulantOrigin screen) screen world)
+                    world content
+            let initializers = this.Initializers (this.Model screen, screen, world)
+            List.fold (fun world initializer ->
+                match initializer with
+                | PropertyDefinition def ->
+                    let propertyName = def.PropertyName
+                    let alwaysPublish = Reflection.isPropertyAlwaysPublishByName propertyName
+                    let nonPersistent = not (Reflection.isPropertyPersistentByName propertyName)
+                    let property = { PropertyType = def.PropertyType; PropertyValue = PropertyExpr.eval def.PropertyExpr world }
+                    World.setProperty def.PropertyName alwaysPublish nonPersistent property screen world
+                | EventHandlerDefinition (handler, partialAddress) ->
+                    let eventAddress = partialAddress --> screen
+                    World.monitor (fun (evt : Event) world ->
+                        WorldModule.trySignal (handler evt) screen world)
+                        eventAddress (screen :> Simulant) world
+                | FixDefinition (left, right, breaking) ->
+                    WorldModule.fix5 screen left right breaking world)
+                world initializers
 
         override this.Actualize (screen, world) =
             let views = this.View (this.GetModel screen world, screen, world)
@@ -1973,13 +2067,16 @@ module ScreenDispatcherModule =
             | :? Signal<obj, 'command> as signal -> screen.Signal<'model, 'message, 'command> (match signal with Command command -> cmd command | _ -> failwithumf ()) world
             | _ -> Log.info "Incorrect signal type returned from event binding."; world
 
+        abstract member Initializers : Lens<'model, World> * Screen * World -> PropertyInitializer list
+        default this.Initializers (_, _, _) = []
+
         abstract member Bindings : 'model * Screen * World -> Binding<'message, 'command, Screen, World> list
         default this.Bindings (_, _, _) = []
 
-        abstract member Message : 'message * 'model * Screen * World -> 'model * Signal<'message, 'command>
-        default this.Message (_, model, _, _) = just model
+        abstract member Message : 'model * 'message * Screen * World -> 'model * Signal<'message, 'command>
+        default this.Message (model, _, _, _) = just model
 
-        abstract member Command : 'command * 'model * Screen * World -> World * Signal<'message, 'command>
+        abstract member Command : 'model * 'command * Screen * World -> World * Signal<'message, 'command>
         default this.Command (_, _, _, world) = just world
 
         abstract member Content : Lens<'model, World> * Screen * World -> LayerContent list
